@@ -35,7 +35,7 @@ across Péclet number (Pe), temperature (T), and bending rigidity (κ).
 
 **Experimental data:** :blue[⭐ 10°C], :green[⭐ 20°C], :red[⭐ 30°C]
 
-**See `README.md` on the GitHub repo for details: **
+**See `README.md` on the GitHub repo for details** **: **
 [![GitHub](https://img.shields.io/badge/GitHub-Repository-blue?logo=github)](https://github.com/Mainv4/active-polymer-worms-viz/)
 """
 )
