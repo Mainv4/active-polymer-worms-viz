@@ -148,6 +148,16 @@ kappa_selected = st.sidebar.multiselect(
 st.sidebar.subheader("Data Quality")
 exclude_nan = st.sidebar.checkbox("Exclude rows with any NaN", value=False)
 
+# Documentation
+st.sidebar.markdown("---")
+with st.sidebar.expander("📖 Documentation"):
+    readme_path = Path(__file__).parent / "README.md"
+    if readme_path.exists():
+        readme_content = readme_path.read_text()
+        st.markdown(readme_content)
+    else:
+        st.warning("README.md not found")
+
 # Apply filters with hybrid logic (range AND discrete selection)
 
 # Pe filter logic

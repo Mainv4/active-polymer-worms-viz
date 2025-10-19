@@ -1,13 +1,20 @@
-# Interactive Data Visualization
+# Active Polymer Worms Visualization
 
-A Streamlit web application for exploring active polymer simulation data (N=40).
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://active-polymer-worms-viz.streamlit.app)
+[![GitHub](https://img.shields.io/badge/GitHub-Repository-blue?logo=github)](https://github.com/Mainv4/active-polymer-worms-viz/)
+
+Interactive web application for exploring active polymer simulation data (N=40 beads). Visualize observables from free space and confinement experiments with advanced filtering, color mapping, and experimental data overlay.
+
+## 🚀 Live Demo
+
+**[Launch the app →](https://active-polymer-worms-viz.streamlit.app)**
 
 ## Installation
 
 Install the required dependencies:
 
 ```bash
-cd INTERACTIVE_VISUALIZATION
+cd active-polymer-worms-viz
 pip install -r requirements.txt
 ```
 
@@ -23,16 +30,24 @@ The application will open automatically in your browser at http://localhost:8501
 
 ## Features
 
-### Data Filtering
-- Sliders to filter by Péclet number (Pe) and bending rigidity (κ)
-- Multi-select dropdown for temperature (T) values
+### Data Source Selection
+- Choose between **Free Space** (H_free base) or **Confinement** (H_conf base) reference datasets
+- Fuzzy matching (tolerance=0.05) to maximize data coverage for selected observables
+
+### Advanced Filtering
+- Dual-mode filtering: Range sliders + discrete value selection
+- Filter by Péclet number (Pe), temperature (T), and bending rigidity (κ)
 - Option to exclude rows containing NaN values
+- Real-time display of filtered point count
 
 ### Interactive Plotting
 - Select variables for X-axis, Y-axis, color mapping, and point size
+- **Line connections**: Connect points sharing the same Pe, T, or κ value
 - Interactive Plotly charts with zoom, pan, and hover functionality
-- Choice of color scales (Viridis, Plasma, Inferno, Magma, Cividis, Turbo)
-- Optional logarithmic scaling for axes
+- Choice of 6 color scales (Viridis, Plasma, Inferno, Magma, Cividis, Turbo)
+- Optional logarithmic scaling for X and Y axes
+- **Experimental data overlay**: Display experimental measurements as colored stars
+  - :blue_circle: 10°C | :green_circle: 20°C | :red_circle: 30°C
 
 ### Data Table
 - Filtered data table display
@@ -63,14 +78,20 @@ Both datasets contain the same columns:
 
 **Free space observables:**
 - **H_free**: Shannon entropy
-- **lp_free**: Persistence length (normalized by contour length)
+- **lp_free**: Persistence length from averaged correlation (normalized by contour length)
+- **lp_free_individual**: Persistence length from individual polymer average (normalized by contour length)
 - **tau_decorr**: End-to-end vector decorrelation time (seconds)
 - **D_long**: Long-time diffusion coefficient (mm²/s)
 
 **Confinement observables (cavity only):**
 - **H_conf**: Shannon entropy
-- **lp_conf**: Persistence length (normalized by contour length)
+- **lp_conf**: Persistence length from averaged correlation (normalized by contour length)
+- **lp_conf_individual**: Persistence length from individual polymer average (normalized by contour length)
 - **ttrap**: Mean trapping time (minutes)
+
+**Experimental data:**
+- **data_exp.csv**: Experimental measurements at 10°C, 20°C, and 30°C
+- Displayed as colored stars on plots when applicable variables are selected
 
 ### Fuzzy Matching Methodology
 
@@ -93,5 +114,5 @@ python3 compile_all_data.py
 ```
 
 This will create/update both:
-- `INTERACTIVE_VISUALIZATION/data_freespace.csv` (H_free reference base)
-- `INTERACTIVE_VISUALIZATION/data_confinement.csv` (H_conf reference base)
+- `active-polymer-worms-viz/data_freespace.csv` (H_free reference base)
+- `active-polymer-worms-viz/data_confinement.csv` (H_conf reference base)
