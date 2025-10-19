@@ -83,8 +83,8 @@ data_source = st.sidebar.radio(
         "Free Space (H_free)" if x == "freespace" else "Confinement (H_conf)"
     ),
     help="Choose which observable is used as the reference base for fuzzy matching. "
-    "Confinement maximizes number of data points thanks to fuzzy matching",
-    "free space maximizes accuracy for free space correlations."
+    "Free space maximizes data points for free space correlations, "
+    "confinement maximizes data points for confinement correlations."
 )
 
 try:
