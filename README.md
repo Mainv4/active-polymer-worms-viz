@@ -5,8 +5,6 @@
 
 Interactive web application for exploring active polymer simulation data (N=40 beads). Visualize observables from free space and confinement experiments with advanced filtering, color mapping, and experimental data overlay.
 
-## 🚀 Live Demo
-
 **[Launch the app →](https://active-polymer-worms-viz.streamlit.app)**
 
 ## Installation
