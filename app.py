@@ -57,9 +57,9 @@ def load_data(data_source="freespace"):
     df = pd.read_csv(csv_path, comment="#")
 
     # Round parameter values to avoid duplicates from fuzzy matching
-    df['Pe'] = df['Pe'].round(2)
-    df['T'] = df['T'].round(2)
-    df['kappa'] = df['kappa'].round(2)
+    df["Pe"] = df["Pe"].round(2)
+    df["T"] = df["T"].round(2)
+    df["kappa"] = df["kappa"].round(2)
 
     return df
 
@@ -79,10 +79,12 @@ st.sidebar.header("🗂️ Data Source")
 data_source = st.sidebar.radio(
     "Reference base:",
     options=["freespace", "confinement"],
-    format_func=lambda x: "Free Space (H_free)" if x == "freespace" else "Confinement (H_conf)",
+    format_func=lambda x: (
+        "Free Space (H_free)" if x == "freespace" else "Confinement (H_conf)"
+    ),
     help="Choose which observable is used as the reference base for fuzzy matching. "
-         "Free space maximizes data points for free space correlations, "
-         "confinement maximizes data points for confinement correlations."
+    "Confinement maximizes number of data points thanks to fuzzy matching",
+    "free space maximizes accuracy for free space correlations.",
 )
 
 try:
@@ -109,9 +111,7 @@ st.sidebar.subheader("Parameters")
 
 # Pe filter (range + discrete selection)
 pe_min, pe_max = float(df["Pe"].min()), float(df["Pe"].max())
-pe_range = st.sidebar.slider(
-    "Pe range", pe_min, pe_max, (pe_min, pe_max), step=0.1
-)
+pe_range = st.sidebar.slider("Pe range", pe_min, pe_max, (pe_min, pe_max), step=0.1)
 pe_values = sorted(df["Pe"].unique())
 pe_selected = st.sidebar.multiselect(
     "Pick specific Pe (optional)",
@@ -122,9 +122,7 @@ pe_selected = st.sidebar.multiselect(
 
 # T filter (range + discrete selection)
 t_min, t_max = float(df["T"].min()), float(df["T"].max())
-t_range = st.sidebar.slider(
-    "T range", t_min, t_max, (t_min, t_max), step=0.01
-)
+t_range = st.sidebar.slider("T range", t_min, t_max, (t_min, t_max), step=0.01)
 t_values = sorted(df["T"].unique())
 t_selected = st.sidebar.multiselect(
     "Pick specific T (optional)",
@@ -155,7 +153,11 @@ exclude_nan = st.sidebar.checkbox("Exclude rows with any NaN", value=False)
 # Pe filter logic
 if len(pe_selected) > 0:
     # If discrete selection is made, use intersection of range and selected values
-    pe_mask = df["Pe"].isin(pe_selected) & (df["Pe"] >= pe_range[0]) & (df["Pe"] <= pe_range[1])
+    pe_mask = (
+        df["Pe"].isin(pe_selected)
+        & (df["Pe"] >= pe_range[0])
+        & (df["Pe"] <= pe_range[1])
+    )
 else:
     # If no discrete selection, use only range
     pe_mask = (df["Pe"] >= pe_range[0]) & (df["Pe"] <= pe_range[1])
@@ -163,7 +165,9 @@ else:
 # T filter logic
 if len(t_selected) > 0:
     # If discrete selection is made, use intersection of range and selected values
-    t_mask = df["T"].isin(t_selected) & (df["T"] >= t_range[0]) & (df["T"] <= t_range[1])
+    t_mask = (
+        df["T"].isin(t_selected) & (df["T"] >= t_range[0]) & (df["T"] <= t_range[1])
+    )
 else:
     # If no discrete selection, use only range
     t_mask = (df["T"] >= t_range[0]) & (df["T"] <= t_range[1])
@@ -171,7 +175,11 @@ else:
 # κ filter logic
 if len(kappa_selected) > 0:
     # If discrete selection is made, use intersection of range and selected values
-    kappa_mask = df["kappa"].isin(kappa_selected) & (df["kappa"] >= kappa_range[0]) & (df["kappa"] <= kappa_range[1])
+    kappa_mask = (
+        df["kappa"].isin(kappa_selected)
+        & (df["kappa"] >= kappa_range[0])
+        & (df["kappa"] <= kappa_range[1])
+    )
 else:
     # If no discrete selection, use only range
     kappa_mask = (df["kappa"] >= kappa_range[0]) & (df["kappa"] <= kappa_range[1])
@@ -253,7 +261,7 @@ with col_opt3:
         "Connect points by",
         ["None", "Pe", "T", "kappa"],
         index=0,
-        help="Draw lines connecting points with the same parameter value"
+        help="Draw lines connecting points with the same parameter value",
     )
 
 # Create plot
@@ -261,7 +269,7 @@ if len(df_filtered) == 0:
     st.warning("⚠️ No data points match the current filters")
 else:
     # Prepare plot data
-    plot_data = df_filtered[[x_var, y_var, 'T', 'Pe', 'kappa']].copy()
+    plot_data = df_filtered[[x_var, y_var, "T", "Pe", "kappa"]].copy()
 
     # Handle color
     if color_var != "None":
@@ -288,7 +296,7 @@ else:
         hover_data={
             x_var: ":.4f",
             y_var: ":.4f",
-            'T': ":.2f",
+            "T": ":.2f",
             color_col: ":.4f" if color_col else False,
             size_col: ":.4f" if size_col else False,
         },
@@ -319,7 +327,7 @@ else:
                     mode="lines",
                     line=dict(color="gray", width=2, dash="solid"),
                     showlegend=False,
-                    hoverinfo="skip"
+                    hoverinfo="skip",
                 )
             )
 
@@ -340,14 +348,14 @@ else:
 
     # Add experimental data points if available
     if df_exp is not None and x_var in df_exp.columns and y_var in df_exp.columns:
-        exp_plot_data = df_exp[['T_celsius', x_var, y_var]].dropna()
+        exp_plot_data = df_exp[["T_celsius", x_var, y_var]].dropna()
         if len(exp_plot_data) > 0:
             # Color map for temperatures
-            temp_colors = {10: 'blue', 20: 'green', 30: 'red'}
+            temp_colors = {10: "blue", 20: "green", 30: "red"}
 
             # Add one trace per temperature
-            for temp in exp_plot_data['T_celsius'].unique():
-                temp_data = exp_plot_data[exp_plot_data['T_celsius'] == temp]
+            for temp in exp_plot_data["T_celsius"].unique():
+                temp_data = exp_plot_data[exp_plot_data["T_celsius"] == temp]
                 fig.add_trace(
                     go.Scatter(
                         x=temp_data[x_var],
@@ -356,11 +364,11 @@ else:
                         marker=dict(
                             symbol="star",
                             size=20,
-                            color=temp_colors.get(temp, 'black'),
-                            line=dict(color="black", width=2)
+                            color=temp_colors.get(temp, "black"),
+                            line=dict(color="black", width=2),
                         ),
                         name=f"Exp T={int(temp)}°C",
-                        showlegend=False
+                        showlegend=False,
                     )
                 )
 
@@ -401,7 +409,7 @@ else:
 st.markdown("---")
 st.markdown(
     """
-    **Data source:** `data.csv` (Active Polymer N=40)
+    **Data source:** `data_freespace.csv` or `data_confinement.csv` (polymer with N=40 beads)
 
     **Note:** Uses fuzzy matching (tolerance=0.05) to combine free space and confinement data.
     """
