@@ -275,6 +275,21 @@ with col_opt3:
         help="Draw lines connecting points with the same parameter value",
     )
 
+# Highlight series selector (only shown when connecting lines)
+highlight_series = None
+if connect_by != "None":
+    # Get unique values for the selected connection parameter
+    unique_vals = sorted(df_filtered[connect_by].unique())
+    highlight_options = ["All (show all)"] + [
+        f"{connect_by}={val:.2f}" for val in unique_vals
+    ]
+    highlight_series = st.selectbox(
+        "Highlight series",
+        highlight_options,
+        index=0,
+        help="Focus on a specific series by dimming others",
+    )
+
 # Create plot
 if len(df_filtered) == 0:
     st.warning("⚠️ No data points match the current filters")
@@ -317,18 +332,53 @@ else:
         },
     )
 
+    # Dim scatter points if a specific series is highlighted
+    if highlight_series and highlight_series != "All (show all)":
+        fig.update_traces(marker=dict(opacity=0.5), selector=dict(mode="markers"))
+
     # Add connecting lines if requested
     if connect_by != "None":
         # Get unique values of the connection parameter
         unique_vals = sorted(plot_data[connect_by].unique())
+
+        # Extract highlighted value if a specific series is selected
+        highlighted_val = None
+        if highlight_series and highlight_series != "All (show all)":
+            # Parse "Pe=0.50" -> 0.50
+            highlighted_val = float(highlight_series.split("=")[1])
 
         for val in unique_vals:
             # Filter data for this parameter value
             mask = plot_data[connect_by] == val
             subset = plot_data[mask].copy()
 
-            # Sort by x_var for proper line drawing
-            subset = subset.sort_values(by=x_var)
+            # Remove NaN values in x_var and y_var to avoid gaps in lines
+            subset = subset.dropna(subset=[x_var, y_var])
+
+            # Skip if less than 2 points remain (can't draw a line)
+            if len(subset) < 2:
+                continue
+
+            # Sort by x_var, then by T and kappa for deterministic ordering
+            # This ensures stable line drawing when multiple points have the same x_var value
+            subset = subset.sort_values(by=[x_var, "T", "kappa"])
+
+            # Determine line style based on highlighting
+            if highlighted_val is None:
+                # No highlighting: default style
+                line_width = 2
+                line_opacity = 1.0
+                line_color = "gray"
+            elif abs(val - highlighted_val) < 1e-6:
+                # This is the highlighted series: make it prominent
+                line_width = 4
+                line_opacity = 1.0
+                line_color = "#FF4B4B"  # Streamlit red
+            else:
+                # Other series: dim them
+                line_width = 1
+                line_opacity = 0.15
+                line_color = "lightgray"
 
             # Add line trace (no markers, just lines)
             fig.add_trace(
@@ -336,7 +386,8 @@ else:
                     x=subset[x_var],
                     y=subset[y_var],
                     mode="lines",
-                    line=dict(color="gray", width=2, dash="solid"),
+                    line=dict(color=line_color, width=line_width),
+                    opacity=line_opacity,
                     showlegend=False,
                     hoverinfo="skip",
                 )
