@@ -504,7 +504,7 @@ with tab2:
         )
 
     # Plot options
-    opt_col1, opt_col2, opt_col3 = st.columns(3)
+    opt_col1, opt_col2, opt_col3, opt_col4 = st.columns(4)
     with opt_col1:
         use_log_y = st.checkbox("Log scale (Y-axis)", value=False)
     with opt_col2:
@@ -515,6 +515,16 @@ with tab2:
         )
     with opt_col3:
         show_secondary_lines = st.checkbox("Show secondary linking lines", value=False)
+    with opt_col4:
+        # Get available parameters for secondary linking (exclude current grouping parameter)
+        available_params = ["Pe", "kappa", "T", "lp_free", "lp_conf"]
+        available_params = [p for p in available_params if p != group_by]
+        secondary_link_param = st.selectbox(
+            "Secondary link by",
+            available_params,
+            index=0 if "kappa" not in available_params or group_by == "kappa" else available_params.index("kappa"),
+            disabled=not show_secondary_lines
+        )
 
     # Create plot based on display mode
     if len(df_filtered) > 0:
@@ -529,7 +539,7 @@ with tab2:
         secondary_param = None
         secondary_values = []
         if show_secondary_lines:
-            secondary_param = "kappa" if group_by == "Pe" else "Pe"
+            secondary_param = secondary_link_param
             secondary_values = sorted(df_filtered[secondary_param].dropna().unique())
 
         if display_mode == "3 temperatures":
