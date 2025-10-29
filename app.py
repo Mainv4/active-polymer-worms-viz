@@ -492,7 +492,7 @@ with tab2:
     with col2:
         x_param = st.selectbox(
             "X-axis Parameter",
-            ["Pe", "kappa", "lp_free", "lp_conf"],
+            ["Pe", "kappa", "H_free", "H_conf", "lp_free", "lp_conf"],
             index=0
         )
 
@@ -500,7 +500,7 @@ with tab2:
         group_by = st.selectbox(
             "Group lines by",
             ["kappa", "Pe"],
-            index=0 if x_param in ["Pe", "lp_free", "lp_conf"] else 1
+            index=0 if x_param in ["Pe", "H_free", "H_conf", "lp_free", "lp_conf"] else 1
         )
 
     # Plot options
@@ -508,11 +508,25 @@ with tab2:
     with opt_col1:
         use_log_y = st.checkbox("Log scale (Y-axis)", value=False)
     with opt_col2:
-        color_palette = st.selectbox(
-            "Color palette",
-            ["Plotly", "D3", "G10", "T10", "Alphabet"],
+        color_scheme_type = st.selectbox(
+            "Color scheme",
+            ["Discrete", "Gradient"],
             index=0
         )
+        if color_scheme_type == "Discrete":
+            color_palette = st.selectbox(
+                "Color palette",
+                ["Plotly", "D3", "G10", "T10", "Alphabet"],
+                index=0,
+                key="discrete_palette"
+            )
+        else:
+            color_palette = st.selectbox(
+                "Color scale",
+                ["Viridis", "Plasma", "Turbo", "Inferno", "Magma", "Cividis", "Blues", "Greens", "Reds", "YlOrRd"],
+                index=0,
+                key="gradient_palette"
+            )
     with opt_col3:
         show_secondary_lines = st.checkbox("Show secondary linking lines", value=False)
     with opt_col4:
@@ -531,9 +545,29 @@ with tab2:
         # Get unique group values
         group_values = sorted(df_filtered[group_by].dropna().unique())
 
-        # Color mapping
-        colors = px.colors.qualitative.__dict__[color_palette]
-        color_map = {val: colors[i % len(colors)] for i, val in enumerate(group_values)}
+        # Color mapping based on scheme type
+        if color_scheme_type == "Discrete":
+            # Discrete color palette (qualitative)
+            colors = px.colors.qualitative.__dict__[color_palette]
+            color_map = {val: colors[i % len(colors)] for i, val in enumerate(group_values)}
+        else:
+            # Gradient color scale (sequential/continuous)
+            import plotly.colors as pc
+
+            # Normalize group values to [0, 1] range
+            if len(group_values) > 1:
+                min_val = min(group_values)
+                max_val = max(group_values)
+                normalized_vals = [(val - min_val) / (max_val - min_val) for val in group_values]
+            else:
+                normalized_vals = [0.5]  # Single value -> use middle of colorscale
+
+            # Sample colors from the gradient scale
+            color_map = {}
+            for i, val in enumerate(group_values):
+                # Get color at normalized position
+                color_rgb = pc.sample_colorscale(color_palette.lower(), [normalized_vals[i]])[0]
+                color_map[val] = color_rgb
 
         # Determine secondary linking parameter (if enabled)
         secondary_param = None
