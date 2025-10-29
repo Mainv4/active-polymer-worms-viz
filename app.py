@@ -490,7 +490,7 @@ with tab2:
     with col2:
         x_param = st.selectbox(
             "X-axis Parameter",
-            ["Pe", "kappa"],
+            ["Pe", "kappa", "lp_free"],
             index=0
         )
 
@@ -498,7 +498,7 @@ with tab2:
         group_by = st.selectbox(
             "Group lines by",
             ["kappa", "Pe"],
-            index=0 if x_param == "Pe" else 1
+            index=0 if x_param in ["Pe", "lp_free"] else 1
         )
 
     # Plot options
