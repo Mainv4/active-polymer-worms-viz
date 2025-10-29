@@ -565,15 +565,26 @@ with tab2:
 
                 # Plot for each group
                 for group_val in group_values:
-                    df_group = df_temp[df_temp[group_by] == group_val].copy()
+                    # Use tolerance for filtering (similar to temperature filtering)
+                    tolerance = 0.001
+                    df_group = df_temp[np.abs(df_temp[group_by] - group_val) < tolerance].copy()
 
                     if len(df_group) == 0:
                         continue
 
-                    # Sort by x_param
-                    df_group = df_group.sort_values(x_param)
+                    # Remove any rows with NaN or inf in x_param or observable
+                    df_group = df_group[
+                        np.isfinite(df_group[x_param]) &
+                        np.isfinite(df_group[observable])
+                    ].copy()
 
-                    # Add trace
+                    if len(df_group) == 0:
+                        continue
+
+                    # Sort by x_param and reset index to ensure monotonic path
+                    df_group = df_group.sort_values(x_param).reset_index(drop=True)
+
+                    # Add trace with connectgaps=True to ensure continuous line
                     fig.add_trace(
                         go.Scatter(
                             x=df_group[x_param],
@@ -582,6 +593,7 @@ with tab2:
                             name=f"{group_by}={group_val}",
                             line=dict(color=color_map[group_val], width=2),
                             marker=dict(size=8, color=color_map[group_val]),
+                            connectgaps=True,
                             showlegend=(col_idx == 1),  # Only show legend for first subplot
                             legendgroup=str(group_val),  # Group legend items
                             customdata=np.column_stack((df_group['Pe'], df_group['T'], df_group['kappa'])),
@@ -676,15 +688,26 @@ with tab2:
 
             # Plot for each group
             for group_val in group_values:
-                df_group = df_temp[df_temp[group_by] == group_val].copy()
+                # Use tolerance for filtering (similar to temperature filtering)
+                tolerance = 0.001
+                df_group = df_temp[np.abs(df_temp[group_by] - group_val) < tolerance].copy()
 
                 if len(df_group) == 0:
                     continue
 
-                # Sort by x_param
-                df_group = df_group.sort_values(x_param)
+                # Remove any rows with NaN or inf in x_param or observable
+                df_group = df_group[
+                    np.isfinite(df_group[x_param]) &
+                    np.isfinite(df_group[observable])
+                ].copy()
 
-                # Add trace
+                if len(df_group) == 0:
+                    continue
+
+                # Sort by x_param and reset index to ensure monotonic path
+                df_group = df_group.sort_values(x_param).reset_index(drop=True)
+
+                # Add trace with connectgaps=True to ensure continuous line
                 fig.add_trace(
                     go.Scatter(
                         x=df_group[x_param],
@@ -693,6 +716,7 @@ with tab2:
                         name=f"{group_by}={group_val}",
                         line=dict(color=color_map[group_val], width=2),
                         marker=dict(size=8, color=color_map[group_val]),
+                        connectgaps=True,
                         customdata=np.column_stack((df_group['Pe'], df_group['T'], df_group['kappa'])),
                         hovertemplate='<b>Pe</b>: %{customdata[0]:.2f}<br>' +
                                       '<b>T</b>: %{customdata[1]:.2f}<br>' +
