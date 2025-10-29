@@ -504,7 +504,7 @@ with tab2:
         )
 
     # Plot options
-    opt_col1, opt_col2 = st.columns(2)
+    opt_col1, opt_col2, opt_col3 = st.columns(3)
     with opt_col1:
         use_log_y = st.checkbox("Log scale (Y-axis)", value=False)
     with opt_col2:
@@ -513,6 +513,8 @@ with tab2:
             ["Plotly", "D3", "G10", "T10", "Alphabet"],
             index=0
         )
+    with opt_col3:
+        show_secondary_lines = st.checkbox("Show secondary linking lines", value=False)
 
     # Create plot based on display mode
     if len(df_filtered) > 0:
@@ -522,6 +524,13 @@ with tab2:
         # Color mapping
         colors = px.colors.qualitative.__dict__[color_palette]
         color_map = {val: colors[i % len(colors)] for i, val in enumerate(group_values)}
+
+        # Determine secondary linking parameter (if enabled)
+        secondary_param = None
+        secondary_values = []
+        if show_secondary_lines:
+            secondary_param = "kappa" if group_by == "Pe" else "Pe"
+            secondary_values = sorted(df_filtered[secondary_param].dropna().unique())
 
         if display_mode == "3 temperatures":
             # ============================================================
@@ -574,6 +583,36 @@ with tab2:
                         ),
                         row=1, col=col_idx
                     )
+
+                # Add secondary linking lines (if enabled)
+                if show_secondary_lines:
+                    for sec_val in secondary_values:
+                        df_sec = df_temp[df_temp[secondary_param] == sec_val].copy()
+
+                        if len(df_sec) == 0:
+                            continue
+
+                        # Sort by x_param
+                        df_sec = df_sec.sort_values(x_param)
+
+                        # Add dashed trace
+                        fig.add_trace(
+                            go.Scatter(
+                                x=df_sec[x_param],
+                                y=df_sec[observable],
+                                mode="lines",
+                                line=dict(color="rgba(128, 128, 128, 0.5)", width=1, dash="dash"),
+                                showlegend=False,
+                                customdata=np.column_stack((df_sec['Pe'], df_sec['T'], df_sec['kappa'])),
+                                hovertemplate='<b>[Secondary]</b><br>' +
+                                              '<b>Pe</b>: %{customdata[0]:.2f}<br>' +
+                                              '<b>T</b>: %{customdata[1]:.2f}<br>' +
+                                              '<b>κ</b>: %{customdata[2]:.2f}<br>' +
+                                              f'<b>{x_param}</b>: %{{x:.4f}}<br>' +
+                                              f'<b>{observable}</b>: %{{y:.4f}}<extra></extra>',
+                            ),
+                            row=1, col=col_idx
+                        )
 
             # Update layout
             fig.update_layout(
@@ -632,8 +671,43 @@ with tab2:
                         name=f"{group_by}={group_val}",
                         line=dict(color=color_map[group_val], width=2),
                         marker=dict(size=8, color=color_map[group_val]),
+                        customdata=np.column_stack((df_group['Pe'], df_group['T'], df_group['kappa'])),
+                        hovertemplate='<b>Pe</b>: %{customdata[0]:.2f}<br>' +
+                                      '<b>T</b>: %{customdata[1]:.2f}<br>' +
+                                      '<b>κ</b>: %{customdata[2]:.2f}<br>' +
+                                      f'<b>{x_param}</b>: %{{x:.4f}}<br>' +
+                                      f'<b>{observable}</b>: %{{y:.4f}}<extra></extra>',
                     )
                 )
+
+            # Add secondary linking lines (if enabled)
+            if show_secondary_lines:
+                for sec_val in secondary_values:
+                    df_sec = df_temp[df_temp[secondary_param] == sec_val].copy()
+
+                    if len(df_sec) == 0:
+                        continue
+
+                    # Sort by x_param
+                    df_sec = df_sec.sort_values(x_param)
+
+                    # Add dashed trace
+                    fig.add_trace(
+                        go.Scatter(
+                            x=df_sec[x_param],
+                            y=df_sec[observable],
+                            mode="lines",
+                            line=dict(color="rgba(128, 128, 128, 0.5)", width=1, dash="dash"),
+                            showlegend=False,
+                            customdata=np.column_stack((df_sec['Pe'], df_sec['T'], df_sec['kappa'])),
+                            hovertemplate='<b>[Secondary]</b><br>' +
+                                          '<b>Pe</b>: %{customdata[0]:.2f}<br>' +
+                                          '<b>T</b>: %{customdata[1]:.2f}<br>' +
+                                          '<b>κ</b>: %{customdata[2]:.2f}<br>' +
+                                          f'<b>{x_param}</b>: %{{x:.4f}}<br>' +
+                                          f'<b>{observable}</b>: %{{y:.4f}}<extra></extra>',
+                        )
+                    )
 
             # Update layout
             fig.update_layout(
