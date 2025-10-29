@@ -93,6 +93,16 @@ try:
     df = load_data(data_source)
     df_exp = load_exp_data()
 
+    # Error column mapping: maps observable to its error column
+    ERROR_COLUMNS = {
+        'D_long': 'D_long_error',
+        'lp_free': 'lp_free_error',
+        'lp_conf': 'lp_conf_error',
+        'lp_free_individual': 'lp_free_individual_std',
+        'tau_decorr': 'tau_decorr_error',
+        'ttrap': 'ttrap_std'
+    }
+
     # Display data source info
     if data_source == "freespace":
         st.sidebar.success(f"✓ Loaded {len(df)} points (H_free base)")
@@ -224,6 +234,8 @@ numeric_cols = [
     "lp_conf",
     "lp_conf_individual",
     "ttrap",
+    "transloc_rate_per_hour",
+    "transloc_success_rate",
 ]
 
 # LaTeX labels mapping (using HTML entities for Greek letters)
@@ -240,6 +252,8 @@ latex_labels = {
     "lp_conf": "ℓ<sub>p</sub> / L (corr, conf)",
     "lp_conf_individual": "ℓ<sub>p</sub> / L (indiv, conf)",
     "ttrap": "t<sub>trap</sub> (min)",
+    "transloc_rate_per_hour": "Translocation rate (events/h)",
+    "transloc_success_rate": "Translocation success rate (%)",
 }
 
 # ==================================================================================
@@ -485,14 +499,16 @@ with tab2:
         observable = st.selectbox(
             "Observable (Y-axis)",
             ["H_free", "lp_free", "lp_free_individual", "tau_decorr", "D_long",
-             "H_conf", "lp_conf", "lp_conf_individual", "ttrap"],
+             "H_conf", "lp_conf", "lp_conf_individual", "ttrap",
+             "transloc_rate_per_hour", "transloc_success_rate"],
             index=0
         )
 
     with col2:
         x_param = st.selectbox(
             "X-axis Parameter",
-            ["Pe", "kappa", "H_free", "H_conf", "lp_free", "lp_conf"],
+            ["Pe", "kappa", "H_free", "H_conf", "lp_free", "lp_conf",
+             "transloc_rate_per_hour", "transloc_success_rate"],
             index=0
         )
 
@@ -539,6 +555,18 @@ with tab2:
             index=0 if "kappa" not in available_params or group_by == "kappa" else available_params.index("kappa"),
             disabled=not show_secondary_lines
         )
+
+    # Additional options row
+    opt2_col1, opt2_col2, opt2_col3, opt2_col4 = st.columns(4)
+    # Error bars functionality kept but button hidden for now
+    # with opt2_col1:
+    #     show_error_bars = st.checkbox(
+    #         "Show error bars",
+    #         value=False,
+    #         disabled=observable not in ERROR_COLUMNS,
+    #         help="Display error bars when available for selected observable"
+    #     )
+    show_error_bars = False  # Disabled for now
 
     # Create plot based on display mode
     if len(df_filtered) > 0:
@@ -618,6 +646,35 @@ with tab2:
                     # Sort by x_param and reset index to ensure monotonic path
                     df_group = df_group.sort_values(x_param).reset_index(drop=True)
 
+                    # Prepare error bars if enabled
+                    error_x_dict = None
+                    error_y_dict = None
+
+                    if show_error_bars:
+                        # Check for X-axis error bars
+                        if x_param in ERROR_COLUMNS:
+                            error_col_x = ERROR_COLUMNS[x_param]
+                            if error_col_x in df_group.columns:
+                                error_values_x = df_group[error_col_x].fillna(0).values
+                                if np.any(error_values_x > 0):
+                                    error_x_dict = dict(
+                                        type='data',
+                                        array=error_values_x,
+                                        visible=True
+                                    )
+
+                        # Check for Y-axis error bars
+                        if observable in ERROR_COLUMNS:
+                            error_col_y = ERROR_COLUMNS[observable]
+                            if error_col_y in df_group.columns:
+                                error_values_y = df_group[error_col_y].fillna(0).values
+                                if np.any(error_values_y > 0):
+                                    error_y_dict = dict(
+                                        type='data',
+                                        array=error_values_y,
+                                        visible=True
+                                    )
+
                     # Add trace with connectgaps=True to ensure continuous line
                     fig.add_trace(
                         go.Scatter(
@@ -627,6 +684,8 @@ with tab2:
                             name=f"{group_by}={group_val}",
                             line=dict(color=color_map[group_val], width=2),
                             marker=dict(size=8, color=color_map[group_val]),
+                            error_x=error_x_dict,
+                            error_y=error_y_dict,
                             connectgaps=True,
                             showlegend=(col_idx == 1),  # Only show legend for first subplot
                             legendgroup=str(group_val),  # Group legend items
@@ -741,6 +800,35 @@ with tab2:
                 # Sort by x_param and reset index to ensure monotonic path
                 df_group = df_group.sort_values(x_param).reset_index(drop=True)
 
+                # Prepare error bars if enabled
+                error_x_dict = None
+                error_y_dict = None
+
+                if show_error_bars:
+                    # Check for X-axis error bars
+                    if x_param in ERROR_COLUMNS:
+                        error_col_x = ERROR_COLUMNS[x_param]
+                        if error_col_x in df_group.columns:
+                            error_values_x = df_group[error_col_x].fillna(0).values
+                            if np.any(error_values_x > 0):
+                                error_x_dict = dict(
+                                    type='data',
+                                    array=error_values_x,
+                                    visible=True
+                                )
+
+                    # Check for Y-axis error bars
+                    if observable in ERROR_COLUMNS:
+                        error_col_y = ERROR_COLUMNS[observable]
+                        if error_col_y in df_group.columns:
+                            error_values_y = df_group[error_col_y].fillna(0).values
+                            if np.any(error_values_y > 0):
+                                error_y_dict = dict(
+                                    type='data',
+                                    array=error_values_y,
+                                    visible=True
+                                )
+
                 # Add trace with connectgaps=True to ensure continuous line
                 fig.add_trace(
                     go.Scatter(
@@ -750,6 +838,8 @@ with tab2:
                         name=f"{group_by}={group_val}",
                         line=dict(color=color_map[group_val], width=2),
                         marker=dict(size=8, color=color_map[group_val]),
+                        error_x=error_x_dict,
+                        error_y=error_y_dict,
                         connectgaps=True,
                         customdata=np.column_stack((df_group['Pe'], df_group['T'], df_group['kappa'])),
                         hovertemplate='<b>Pe</b>: %{customdata[0]:.2f}<br>' +
