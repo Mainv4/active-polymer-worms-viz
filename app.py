@@ -597,21 +597,33 @@ with tab2:
                 # Add secondary linking lines (if enabled)
                 if show_secondary_lines:
                     for sec_val in secondary_values:
-                        df_sec = df_temp[df_temp[secondary_param] == sec_val].copy()
+                        # Use tolerance for filtering (similar to temperature filtering)
+                        tolerance = 0.001
+                        df_sec = df_temp[np.abs(df_temp[secondary_param] - sec_val) < tolerance].copy()
 
                         if len(df_sec) == 0:
                             continue
 
-                        # Sort by x_param
-                        df_sec = df_sec.sort_values(x_param)
+                        # Remove any rows with NaN or inf in x_param or observable
+                        df_sec = df_sec[
+                            np.isfinite(df_sec[x_param]) &
+                            np.isfinite(df_sec[observable])
+                        ].copy()
 
-                        # Add dashed trace
+                        if len(df_sec) == 0:
+                            continue
+
+                        # Sort by x_param and reset index to ensure monotonic path
+                        df_sec = df_sec.sort_values(x_param).reset_index(drop=True)
+
+                        # Add dashed trace with connectgaps=True to ensure continuous line
                         fig.add_trace(
                             go.Scatter(
                                 x=df_sec[x_param],
                                 y=df_sec[observable],
                                 mode="lines",
                                 line=dict(color="rgba(128, 128, 128, 0.5)", width=1, dash="dash"),
+                                connectgaps=True,
                                 showlegend=False,
                                 customdata=np.column_stack((df_sec['Pe'], df_sec['T'], df_sec['kappa'])),
                                 hovertemplate='<b>[Secondary]</b><br>' +
@@ -693,21 +705,33 @@ with tab2:
             # Add secondary linking lines (if enabled)
             if show_secondary_lines:
                 for sec_val in secondary_values:
-                    df_sec = df_temp[df_temp[secondary_param] == sec_val].copy()
+                    # Use tolerance for filtering (similar to temperature filtering)
+                    tolerance = 0.001
+                    df_sec = df_temp[np.abs(df_temp[secondary_param] - sec_val) < tolerance].copy()
 
                     if len(df_sec) == 0:
                         continue
 
-                    # Sort by x_param
-                    df_sec = df_sec.sort_values(x_param)
+                    # Remove any rows with NaN or inf in x_param or observable
+                    df_sec = df_sec[
+                        np.isfinite(df_sec[x_param]) &
+                        np.isfinite(df_sec[observable])
+                    ].copy()
 
-                    # Add dashed trace
+                    if len(df_sec) == 0:
+                        continue
+
+                    # Sort by x_param and reset index to ensure monotonic path
+                    df_sec = df_sec.sort_values(x_param).reset_index(drop=True)
+
+                    # Add dashed trace with connectgaps=True to ensure continuous line
                     fig.add_trace(
                         go.Scatter(
                             x=df_sec[x_param],
                             y=df_sec[observable],
                             mode="lines",
                             line=dict(color="rgba(128, 128, 128, 0.5)", width=1, dash="dash"),
+                            connectgaps=True,
                             showlegend=False,
                             customdata=np.column_stack((df_sec['Pe'], df_sec['T'], df_sec['kappa'])),
                             hovertemplate='<b>[Secondary]</b><br>' +
