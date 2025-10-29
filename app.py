@@ -335,9 +335,11 @@ with tab1:
             size=size_col,
             color_continuous_scale=colorscale.lower(),
             hover_data={
+                "Pe": ":.2f",
+                "T": ":.2f",
+                "kappa": ":.2f",
                 x_var: ":.4f",
                 y_var: ":.4f",
-                "T": ":.2f",
                 color_col: ":.4f" if color_col else False,
                 size_col: ":.4f" if size_col else False,
             },
@@ -563,6 +565,12 @@ with tab2:
                             marker=dict(size=8, color=color_map[group_val]),
                             showlegend=(col_idx == 1),  # Only show legend for first subplot
                             legendgroup=str(group_val),  # Group legend items
+                            customdata=np.column_stack((df_group['Pe'], df_group['T'], df_group['kappa'])),
+                            hovertemplate='<b>Pe</b>: %{customdata[0]:.2f}<br>' +
+                                          '<b>T</b>: %{customdata[1]:.2f}<br>' +
+                                          '<b>κ</b>: %{customdata[2]:.2f}<br>' +
+                                          f'<b>{x_param}</b>: %{{x:.4f}}<br>' +
+                                          f'<b>{observable}</b>: %{{y:.4f}}<extra></extra>',
                         ),
                         row=1, col=col_idx
                     )
