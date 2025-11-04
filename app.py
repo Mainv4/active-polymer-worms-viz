@@ -99,7 +99,7 @@ try:
         'lp_free': 'lp_free_error',
         'lp_conf': 'lp_conf_error',
         'lp_free_individual': 'lp_free_individual_std',
-        'tau_decorr': 'tau_decorr_error',
+        'tau_decorr_free': 'tau_decorr_free_error',
         'ttrap': 'ttrap_std'
     }
 
@@ -228,7 +228,8 @@ numeric_cols = [
     "H_free",
     "lp_free",
     "lp_free_individual",
-    "tau_decorr",
+    "tau_decorr_free",
+    "tau_decorr_cavity",
     "D_long",
     "H_conf",
     "lp_conf",
@@ -246,7 +247,8 @@ latex_labels = {
     "H_free": "H<sub>free</sub>",
     "lp_free": "ℓ<sub>p</sub> / L (corr, free)",
     "lp_free_individual": "ℓ<sub>p</sub> / L (indiv, free)",
-    "tau_decorr": "τ<sub>decorr</sub> (s)",
+    "tau_decorr_free": "τ<sub>decorr, free</sub> (s)",
+    "tau_decorr_cavity": "τ<sub>decorr, cavity</sub> (s)",
     "D_long": "D<sub>long</sub> (mm²/s)",
     "H_conf": "H<sub>conf</sub>",
     "lp_conf": "ℓ<sub>p</sub> / L (corr, conf)",
@@ -498,7 +500,7 @@ with tab2:
     with col1:
         observable = st.selectbox(
             "Observable (Y-axis)",
-            ["H_free", "lp_free", "lp_free_individual", "tau_decorr", "D_long",
+            ["H_free", "lp_free", "lp_free_individual", "tau_decorr_free", "tau_decorr_cavity", "D_long",
              "H_conf", "lp_conf", "lp_conf_individual", "ttrap",
              "transloc_rate_per_hour", "transloc_success_rate"],
             index=0
@@ -508,6 +510,7 @@ with tab2:
         x_param = st.selectbox(
             "X-axis Parameter",
             ["Pe", "kappa", "H_free", "H_conf", "lp_free", "lp_conf",
+             "tau_decorr_free", "tau_decorr_cavity",
              "transloc_rate_per_hour", "transloc_success_rate"],
             index=0
         )
