@@ -80,7 +80,7 @@ st.sidebar.header("🗂️ Data Source")
 
 data_source = st.sidebar.radio(
     "Reference base:",
-    options=["freespace", "confinement"],
+    options=["confinement", "freespace"],
     format_func=lambda x: (
         "Free Space (H_free)" if x == "freespace" else "Confinement (H_conf)"
     ),
@@ -123,7 +123,7 @@ st.sidebar.subheader("Parameters")
 
 # Pe filter (range + discrete selection)
 pe_min, pe_max = float(df["Pe"].min()), float(df["Pe"].max())
-pe_range = st.sidebar.slider("Pe range", pe_min, pe_max, (pe_min, pe_max), step=0.1)
+pe_range = st.sidebar.slider("Pe range", pe_min, pe_max, (0.30, 1.40), step=0.1)
 pe_values = sorted(df["Pe"].unique())
 pe_selected = st.sidebar.multiselect(
     "Pick specific Pe (optional)",
@@ -134,7 +134,7 @@ pe_selected = st.sidebar.multiselect(
 
 # T filter (range + discrete selection)
 t_min, t_max = float(df["T"].min()), float(df["T"].max())
-t_range = st.sidebar.slider("T range", t_min, t_max, (t_min, t_max), step=0.01)
+t_range = st.sidebar.slider("T range", t_min, t_max, (0.09, 0.30), step=0.01)
 t_values = sorted(df["T"].unique())
 t_selected = st.sidebar.multiselect(
     "Pick specific T (optional)",
@@ -146,7 +146,7 @@ t_selected = st.sidebar.multiselect(
 # κ filter (range + discrete selection)
 kappa_min, kappa_max = float(df["kappa"].min()), float(df["kappa"].max())
 kappa_range = st.sidebar.slider(
-    "κ range", kappa_min, kappa_max, (kappa_min, kappa_max), step=0.1
+    "κ range", kappa_min, kappa_max, (0.50, 2.00), step=0.1
 )
 kappa_values = sorted(df["kappa"].unique())
 kappa_selected = st.sidebar.multiselect(
@@ -274,16 +274,16 @@ with tab1:
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        x_var = st.selectbox("X-axis", numeric_cols, index=11)  # ttrap
+        x_var = st.selectbox("X-axis", numeric_cols, index=7)  # tau_decorr_cavity
 
     with col2:
-        y_var = st.selectbox("Y-axis", numeric_cols, index=3)  # H_free
+        y_var = st.selectbox("Y-axis", numeric_cols, index=12)  # ttrap
 
     with col3:
-        color_var = st.selectbox("Color by", ["None"] + numeric_cols, index=3)  # kappa
+        color_var = st.selectbox("Color by", ["None"] + numeric_cols, index=1)  # Pe
 
     with col4:
-        size_var = st.selectbox("Size by", ["None"] + numeric_cols, index=1)  # Pe
+        size_var = st.selectbox("Size by", ["None"] + numeric_cols, index=3)  # kappa
 
     # Plot options
     col_opt1, col_opt2, col_opt3 = st.columns(3)
@@ -302,8 +302,34 @@ with tab1:
         connect_by = st.selectbox(
             "Connect points by",
             ["None", "Pe", "T", "kappa"],
-            index=0,
+            index=1,  # Pe
             help="Draw lines connecting points with the same parameter value",
+        )
+
+    # Division controls
+    st.markdown("**Optional: Divide observables**")
+    col_div1, col_div2, col_div3, col_div4 = st.columns(4)
+
+    with col_div1:
+        divide_x = st.checkbox("Divide X-axis by", value=False, key="divide_x_tab1")
+
+    with col_div2:
+        x_divisor = st.selectbox(
+            "X divisor",
+            numeric_cols,
+            disabled=not divide_x,
+            key="x_divisor_tab1"
+        )
+
+    with col_div3:
+        divide_y = st.checkbox("Divide Y-axis by", value=False, key="divide_y_tab1")
+
+    with col_div4:
+        y_divisor = st.selectbox(
+            "Y divisor",
+            numeric_cols,
+            disabled=not divide_y,
+            key="y_divisor_tab1"
         )
 
     # Highlight series selector (only shown when connecting lines)
@@ -342,24 +368,69 @@ with tab1:
         else:
             size_col = None
 
+        # Apply division transformations if requested
+        x_col_plot = x_var
+        y_col_plot = y_var
+        x_var_display = x_var
+        y_var_display = y_var
+        latex_labels_custom = latex_labels.copy()
+
+        # Check for self-division and warn
+        if divide_x and x_divisor == x_var:
+            st.warning("⚠️ Cannot divide X-axis by itself. Division disabled for X.")
+            divide_x = False
+
+        if divide_y and y_divisor == y_var:
+            st.warning("⚠️ Cannot divide Y-axis by itself. Division disabled for Y.")
+            divide_y = False
+
+        # Add divisor columns to plot_data if needed
+        if divide_x and x_divisor not in plot_data.columns:
+            plot_data[x_divisor] = df_filtered[x_divisor]
+        if divide_y and y_divisor not in plot_data.columns:
+            plot_data[y_divisor] = df_filtered[y_divisor]
+
+        # Perform X division
+        if divide_x and x_divisor != x_var:
+            x_col_plot = f"{x_var}_divided"
+            plot_data[x_col_plot] = plot_data[x_var] / plot_data[x_divisor].replace(0, np.nan)
+            x_var_display = f"{x_var} / {x_divisor}"
+            latex_labels_custom[x_col_plot] = f"{latex_labels.get(x_var, x_var)} / {latex_labels.get(x_divisor, x_divisor)}"
+
+        # Perform Y division
+        if divide_y and y_divisor != y_var:
+            y_col_plot = f"{y_var}_divided"
+            plot_data[y_col_plot] = plot_data[y_var] / plot_data[y_divisor].replace(0, np.nan)
+            y_var_display = f"{y_var} / {y_divisor}"
+            latex_labels_custom[y_col_plot] = f"{latex_labels.get(y_var, y_var)} / {latex_labels.get(y_divisor, y_divisor)}"
+
+        # Filter out NaN and infinite values from divided columns
+        plot_data = plot_data.replace([np.inf, -np.inf], np.nan)
+        plot_data = plot_data.dropna(subset=[x_col_plot, y_col_plot])
+
         # Always create the base scatter plot with color and size mapping
+        # Build hover_data dynamically to handle divided columns
+        hover_data_dict = {
+            "Pe": ":.2f",
+            "T": ":.2f",
+            "kappa": ":.2f",
+            x_col_plot: ":.4f",
+            y_col_plot: ":.4f",
+            color_col: ":.4f" if color_col else False,
+            size_col: ":.4f" if size_col else False,
+        }
+
         fig = px.scatter(
             plot_data,
-            x=x_var,
-            y=y_var,
+            x=x_col_plot,
+            y=y_col_plot,
             color=color_col,
             size=size_col,
             color_continuous_scale=colorscale.lower(),
-            hover_data={
-                "Pe": ":.2f",
-                "T": ":.2f",
-                "kappa": ":.2f",
-                x_var: ":.4f",
-                y_var: ":.4f",
-                color_col: ":.4f" if color_col else False,
-                size_col: ":.4f" if size_col else False,
-            },
+            hover_data=hover_data_dict,
             labels={
+                x_col_plot: latex_labels_custom.get(x_col_plot, x_var_display),
+                y_col_plot: latex_labels_custom.get(y_col_plot, y_var_display),
                 "color": latex_labels[color_var] if color_var != "None" else "",
                 "size": latex_labels[size_var] if size_var != "None" else "",
             },
@@ -385,16 +456,16 @@ with tab1:
                 mask = plot_data[connect_by] == val
                 subset = plot_data[mask].copy()
 
-                # Remove NaN values in x_var and y_var to avoid gaps in lines
-                subset = subset.dropna(subset=[x_var, y_var])
+                # Remove NaN values in x_col_plot and y_col_plot to avoid gaps in lines
+                subset = subset.dropna(subset=[x_col_plot, y_col_plot])
 
                 # Skip if less than 2 points remain (can't draw a line)
                 if len(subset) < 2:
                     continue
 
-                # Sort by x_var, then by T and kappa for deterministic ordering
-                # This ensures stable line drawing when multiple points have the same x_var value
-                subset = subset.sort_values(by=[x_var, "T", "kappa"])
+                # Sort by x_col_plot, then by T and kappa for deterministic ordering
+                # This ensures stable line drawing when multiple points have the same x_col_plot value
+                subset = subset.sort_values(by=[x_col_plot, "T", "kappa"])
 
                 # Determine line style based on highlighting
                 if highlighted_val is None:
@@ -416,8 +487,8 @@ with tab1:
                 # Add line trace (no markers, just lines)
                 fig.add_trace(
                     go.Scatter(
-                        x=subset[x_var],
-                        y=subset[y_var],
+                        x=subset[x_col_plot],
+                        y=subset[y_col_plot],
                         mode="lines",
                         line=dict(color=line_color, width=line_width),
                         opacity=line_opacity,
@@ -431,8 +502,8 @@ with tab1:
             height=600,
             template="plotly_white",
             font=dict(size=14),
-            xaxis_title=latex_labels[x_var],
-            yaxis_title=latex_labels[y_var],
+            xaxis_title=latex_labels_custom.get(x_col_plot, x_var_display),
+            yaxis_title=latex_labels_custom.get(y_col_plot, y_var_display),
         )
 
         # Apply log scales
@@ -503,7 +574,7 @@ with tab2:
             ["H_free", "lp_free", "lp_free_individual", "tau_decorr_free", "tau_decorr_cavity", "D_long",
              "H_conf", "lp_conf", "lp_conf_individual", "ttrap",
              "transloc_rate_per_hour", "transloc_success_rate"],
-            index=0
+            index=9  # ttrap
         )
 
     with col2:
@@ -512,7 +583,7 @@ with tab2:
             ["Pe", "kappa", "H_free", "H_conf", "lp_free", "lp_conf",
              "tau_decorr_free", "tau_decorr_cavity",
              "transloc_rate_per_hour", "transloc_success_rate"],
-            index=0
+            index=7  # tau_decorr_cavity
         )
 
     with col3:
@@ -535,7 +606,7 @@ with tab2:
         if color_scheme_type == "Discrete":
             color_palette = st.selectbox(
                 "Color palette",
-                ["Plotly", "D3", "G10", "T10", "Alphabet"],
+                ["Alphabet"],
                 index=0,
                 key="discrete_palette"
             )
@@ -570,6 +641,20 @@ with tab2:
     #         help="Display error bars when available for selected observable"
     #     )
     show_error_bars = False  # Disabled for now
+
+    # Division controls for Tab 2
+    with opt2_col2:
+        divide_y_tab2 = st.checkbox("Divide Y by observable", value=False, key="divide_y_tab2")
+
+    with opt2_col3:
+        y_divisor_tab2 = st.selectbox(
+            "Y divisor",
+            ["H_free", "lp_free", "lp_free_individual", "tau_decorr_free", "tau_decorr_cavity", "D_long",
+             "H_conf", "lp_conf", "lp_conf_individual", "ttrap",
+             "transloc_rate_per_hour", "transloc_success_rate"],
+            disabled=not divide_y_tab2,
+            key="y_divisor_tab2"
+        )
 
     # Create plot based on display mode
     if len(df_filtered) > 0:
@@ -649,6 +734,31 @@ with tab2:
                     # Sort by x_param and reset index to ensure monotonic path
                     df_group = df_group.sort_values(x_param).reset_index(drop=True)
 
+                    # Apply division transformation if requested
+                    obs_col_plot = observable
+                    obs_display = observable
+                    obs_label = latex_labels.get(observable, observable)
+
+                    # Check for self-division
+                    if divide_y_tab2 and y_divisor_tab2 == observable:
+                        if col_idx == 1 and group_val == group_values[0]:  # Show warning once
+                            st.warning("⚠️ Cannot divide Y-axis by itself. Division disabled.")
+                        divide_y_tab2_actual = False
+                    else:
+                        divide_y_tab2_actual = divide_y_tab2
+
+                    # Perform Y division
+                    if divide_y_tab2_actual and y_divisor_tab2 != observable:
+                        # Ensure divisor column exists
+                        if y_divisor_tab2 in df_group.columns:
+                            obs_col_plot = f"{observable}_divided"
+                            df_group[obs_col_plot] = df_group[observable] / df_group[y_divisor_tab2].replace(0, np.nan)
+                            obs_display = f"{observable} / {y_divisor_tab2}"
+                            obs_label = f"{latex_labels.get(observable, observable)} / {latex_labels.get(y_divisor_tab2, y_divisor_tab2)}"
+
+                            # Filter out NaN and inf from division
+                            df_group = df_group[np.isfinite(df_group[obs_col_plot])].copy()
+
                     # Prepare error bars if enabled
                     error_x_dict = None
                     error_y_dict = None
@@ -682,7 +792,7 @@ with tab2:
                     fig.add_trace(
                         go.Scatter(
                             x=df_group[x_param],
-                            y=df_group[observable],
+                            y=df_group[obs_col_plot],
                             mode="lines+markers",
                             name=f"{group_by}={group_val}",
                             line=dict(color=color_map[group_val], width=2),
@@ -697,7 +807,7 @@ with tab2:
                                           '<b>T</b>: %{customdata[1]:.2f}<br>' +
                                           '<b>κ</b>: %{customdata[2]:.2f}<br>' +
                                           f'<b>{x_param}</b>: %{{x:.4f}}<br>' +
-                                          f'<b>{observable}</b>: %{{y:.4f}}<extra></extra>',
+                                          f'<b>{obs_display}</b>: %{{y:.4f}}<extra></extra>',
                         ),
                         row=1, col=col_idx
                     )
@@ -724,11 +834,19 @@ with tab2:
                         # Sort by x_param and reset index to ensure monotonic path
                         df_sec = df_sec.sort_values(x_param).reset_index(drop=True)
 
+                        # Apply same division transformation for secondary lines
+                        obs_col_sec = observable
+                        if divide_y_tab2_actual and y_divisor_tab2 != observable:
+                            if y_divisor_tab2 in df_sec.columns:
+                                obs_col_sec = f"{observable}_divided"
+                                df_sec[obs_col_sec] = df_sec[observable] / df_sec[y_divisor_tab2].replace(0, np.nan)
+                                df_sec = df_sec[np.isfinite(df_sec[obs_col_sec])].copy()
+
                         # Add dashed trace with connectgaps=True to ensure continuous line
                         fig.add_trace(
                             go.Scatter(
                                 x=df_sec[x_param],
-                                y=df_sec[observable],
+                                y=df_sec[obs_col_sec],
                                 mode="lines",
                                 line=dict(color="rgba(128, 128, 128, 0.5)", width=1, dash="dash"),
                                 connectgaps=True,
@@ -739,7 +857,7 @@ with tab2:
                                               '<b>T</b>: %{customdata[1]:.2f}<br>' +
                                               '<b>κ</b>: %{customdata[2]:.2f}<br>' +
                                               f'<b>{x_param}</b>: %{{x:.4f}}<br>' +
-                                              f'<b>{observable}</b>: %{{y:.4f}}<extra></extra>',
+                                              f'<b>{obs_display}</b>: %{{y:.4f}}<extra></extra>',
                             ),
                             row=1, col=col_idx
                         )
@@ -759,11 +877,14 @@ with tab2:
                 )
             )
 
-            # Update axes
+            # Update axes (use obs_label defined earlier in the loop)
+            # Note: obs_label is set in the last iteration of group_values loop
             for col_idx in range(1, 4):
                 fig.update_xaxes(title_text=x_param, row=1, col=col_idx)
                 if col_idx == 1:
-                    fig.update_yaxes(title_text=latex_labels[observable], row=1, col=col_idx)
+                    # Use the transformed label if division was applied
+                    y_label = obs_label if divide_y_tab2_actual else latex_labels.get(observable, observable)
+                    fig.update_yaxes(title_text=y_label, row=1, col=col_idx)
 
                 if use_log_y:
                     fig.update_yaxes(type="log", row=1, col=col_idx)
@@ -803,6 +924,31 @@ with tab2:
                 # Sort by x_param and reset index to ensure monotonic path
                 df_group = df_group.sort_values(x_param).reset_index(drop=True)
 
+                # Apply division transformation if requested
+                obs_col_plot = observable
+                obs_display = observable
+                obs_label = latex_labels.get(observable, observable)
+
+                # Check for self-division
+                if divide_y_tab2 and y_divisor_tab2 == observable:
+                    if group_val == group_values[0]:  # Show warning once
+                        st.warning("⚠️ Cannot divide Y-axis by itself. Division disabled.")
+                    divide_y_tab2_actual = False
+                else:
+                    divide_y_tab2_actual = divide_y_tab2
+
+                # Perform Y division
+                if divide_y_tab2_actual and y_divisor_tab2 != observable:
+                    # Ensure divisor column exists
+                    if y_divisor_tab2 in df_group.columns:
+                        obs_col_plot = f"{observable}_divided"
+                        df_group[obs_col_plot] = df_group[observable] / df_group[y_divisor_tab2].replace(0, np.nan)
+                        obs_display = f"{observable} / {y_divisor_tab2}"
+                        obs_label = f"{latex_labels.get(observable, observable)} / {latex_labels.get(y_divisor_tab2, y_divisor_tab2)}"
+
+                        # Filter out NaN and inf from division
+                        df_group = df_group[np.isfinite(df_group[obs_col_plot])].copy()
+
                 # Prepare error bars if enabled
                 error_x_dict = None
                 error_y_dict = None
@@ -836,7 +982,7 @@ with tab2:
                 fig.add_trace(
                     go.Scatter(
                         x=df_group[x_param],
-                        y=df_group[observable],
+                        y=df_group[obs_col_plot],
                         mode="lines+markers",
                         name=f"{group_by}={group_val}",
                         line=dict(color=color_map[group_val], width=2),
@@ -849,7 +995,7 @@ with tab2:
                                       '<b>T</b>: %{customdata[1]:.2f}<br>' +
                                       '<b>κ</b>: %{customdata[2]:.2f}<br>' +
                                       f'<b>{x_param}</b>: %{{x:.4f}}<br>' +
-                                      f'<b>{observable}</b>: %{{y:.4f}}<extra></extra>',
+                                      f'<b>{obs_display}</b>: %{{y:.4f}}<extra></extra>',
                     )
                 )
 
@@ -875,11 +1021,19 @@ with tab2:
                     # Sort by x_param and reset index to ensure monotonic path
                     df_sec = df_sec.sort_values(x_param).reset_index(drop=True)
 
+                    # Apply same division transformation for secondary lines
+                    obs_col_sec = observable
+                    if divide_y_tab2_actual and y_divisor_tab2 != observable:
+                        if y_divisor_tab2 in df_sec.columns:
+                            obs_col_sec = f"{observable}_divided"
+                            df_sec[obs_col_sec] = df_sec[observable] / df_sec[y_divisor_tab2].replace(0, np.nan)
+                            df_sec = df_sec[np.isfinite(df_sec[obs_col_sec])].copy()
+
                     # Add dashed trace with connectgaps=True to ensure continuous line
                     fig.add_trace(
                         go.Scatter(
                             x=df_sec[x_param],
-                            y=df_sec[observable],
+                            y=df_sec[obs_col_sec],
                             mode="lines",
                             line=dict(color="rgba(128, 128, 128, 0.5)", width=1, dash="dash"),
                             connectgaps=True,
@@ -890,7 +1044,7 @@ with tab2:
                                           '<b>T</b>: %{customdata[1]:.2f}<br>' +
                                           '<b>κ</b>: %{customdata[2]:.2f}<br>' +
                                           f'<b>{x_param}</b>: %{{x:.4f}}<br>' +
-                                          f'<b>{observable}</b>: %{{y:.4f}}<extra></extra>',
+                                          f'<b>{obs_display}</b>: %{{y:.4f}}<extra></extra>',
                         )
                     )
 
@@ -898,7 +1052,7 @@ with tab2:
             fig.update_layout(
                 title=f"T = {selected_temp}",
                 xaxis_title=x_param,
-                yaxis_title=latex_labels[observable],
+                yaxis_title=obs_label if divide_y_tab2_actual else latex_labels.get(observable, observable),
                 height=500,
                 template="plotly_white",
                 font=dict(size=12),
