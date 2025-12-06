@@ -177,6 +177,11 @@ def render_trapping_tab():
     with col_ctrl4:
         show_fit = st.checkbox("Show exponential fit", value=True)
 
+    # Additional options
+    col_ctrl5, col_ctrl6, _, _ = st.columns(4)
+    with col_ctrl5:
+        use_log_y = st.checkbox("Log scale (Y-axis)", value=False)
+
     # Filter times
     times_filtered = times[times <= max_cutoff]
 
@@ -234,6 +239,9 @@ def render_trapping_tab():
             x=1
         )
     )
+
+    if use_log_y:
+        fig.update_yaxes(type="log")
 
     st.plotly_chart(fig, use_container_width=True)
 

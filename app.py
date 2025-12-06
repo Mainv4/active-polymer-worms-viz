@@ -17,6 +17,7 @@ import streamlit as st
 from tabs.tab_scatter import render_scatter_tab
 from tabs.tab_parameter_space import render_parameter_space_tab
 from tabs.tab_trapping import render_trapping_tab
+from tabs.tab_tau_params import render_tau_params_tab
 from utils.constants import NUMERIC_COLS
 
 # =============================================================================
@@ -199,7 +200,12 @@ st.sidebar.info(f"**{len(df_filtered)}** / {len(df)} points displayed")
 # MAIN PANEL - TABS
 # =============================================================================
 
-tab1, tab2, tab3 = st.tabs(["📈 Scatter Correlations", "📊 Parameter Space", "📉 Trapping Distributions"])
+tab1, tab2, tab3, tab4 = st.tabs([
+    "📈 Scatter Correlations",
+    "📊 Parameter Space",
+    "📉 Trapping Distributions",
+    "⏱️ τ_trap vs Parameters"
+])
 
 with tab1:
     scatter_vars = render_scatter_tab(df_filtered, df_exp)
@@ -210,6 +216,9 @@ with tab2:
 
 with tab3:
     render_trapping_tab()
+
+with tab4:
+    render_tau_params_tab()
 
 # =============================================================================
 # DATA TABLE
