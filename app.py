@@ -351,8 +351,9 @@ with tab1:
     if len(df_filtered) == 0:
         st.warning("⚠️ No data points match the current filters")
     else:
-        # Prepare plot data
-        plot_data = df_filtered[[x_var, y_var, "T", "Pe", "kappa"]].copy()
+        # Prepare plot data (ensure unique columns)
+        cols_needed = list(dict.fromkeys([x_var, y_var, "T", "Pe", "kappa"]))
+        plot_data = df_filtered[cols_needed].copy()
 
         # Handle color
         if color_var != "None":
