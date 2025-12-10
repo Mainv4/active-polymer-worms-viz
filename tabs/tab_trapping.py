@@ -180,7 +180,7 @@ def render_trapping_tab():
     # Additional options
     col_ctrl5, col_ctrl6, _, _ = st.columns(4)
     with col_ctrl5:
-        use_log_y = st.checkbox("Log scale (Y-axis)", value=False)
+        use_log_y = st.checkbox("Log scale (Y-axis)", value=False, key="trapping_log_y")
 
     # Filter times
     times_filtered = times[times <= max_cutoff]

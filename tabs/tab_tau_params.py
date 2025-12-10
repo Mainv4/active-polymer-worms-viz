@@ -175,7 +175,7 @@ def render_tau_params_tab():
     col_n, col_bins, col_cutoff = st.columns(3)
 
     with col_n:
-        N = st.selectbox("Polymer length (N)", available_N, index=0)
+        N = st.selectbox("Polymer length (N)", available_N, index=0, key="tau_N")
 
     max_time = get_max_time(N)
 
@@ -199,7 +199,8 @@ def render_tau_params_tab():
         observable = st.radio(
             "Observable",
             ["τ_mean", "τ_fit"],
-            horizontal=True
+            horizontal=True,
+            key="tau_observable"
         )
         obs_key = "tau_mean" if observable == "τ_mean" else "tau_fit"
 
@@ -207,21 +208,24 @@ def render_tau_params_tab():
         x_param = st.selectbox(
             "X-axis Parameter",
             ["Pe", "kappa"],
-            index=0
+            index=0,
+            key="tau_x_param"
         )
 
     with col3:
         group_by = st.selectbox(
             "Group lines by",
             ["kappa", "Pe"],
-            index=0 if x_param == "Pe" else 1
+            index=0 if x_param == "Pe" else 1,
+            key="tau_group_by"
         )
 
     # Display mode
     display_mode = st.radio(
         "Display mode",
         ["3 temperatures", "Single temperature"],
-        horizontal=True
+        horizontal=True,
+        key="tau_display_mode"
     )
 
     selected_temp = 0.1
@@ -230,7 +234,8 @@ def render_tau_params_tab():
         selected_temp = st.selectbox(
             "Select temperature",
             available_temps,
-            index=available_temps.index(0.1) if 0.1 in available_temps else 0
+            index=available_temps.index(0.1) if 0.1 in available_temps else 0,
+            key="tau_temp"
         )
 
     # Plot options
