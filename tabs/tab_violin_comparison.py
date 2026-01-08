@@ -90,6 +90,50 @@ def get_common_sim_params():
 
 
 @st.cache_data
+def get_best_params_for_temp(temp_exp, common_params):
+    """
+    Find the simulation parameters with mean τ_trap closest to experimental mean.
+    Returns the index in common_params list.
+    """
+    if not DB_EXP.exists() or not DB_SIM.exists() or not common_params:
+        return 0
+
+    conn_exp = sqlite3.connect(DB_EXP)
+    df_exp = pd.read_sql(
+        f"SELECT time_min FROM exp_trapping_events WHERE T_exp = {temp_exp} AND time_min <= {MAX_TRAP_TIME}",
+        conn_exp,
+    )
+    conn_exp.close()
+
+    if len(df_exp) == 0:
+        return 0
+
+    mean_exp = df_exp["time_min"].mean()
+
+    conn_sim = sqlite3.connect(DB_SIM)
+    best_idx = 0
+    best_diff = float("inf")
+
+    for idx, (Pe, T, kappa) in enumerate(common_params):
+        df_sim = pd.read_sql(
+            f"""SELECT time_min FROM trapping_events
+                WHERE N = 40 AND ABS(Pe - {Pe}) < 0.001
+                AND ABS(T - {T}) < 0.001 AND ABS(kappa - {kappa}) < 0.001
+                AND time_min <= {MAX_TRAP_TIME}""",
+            conn_sim,
+        )
+        if len(df_sim) > 0:
+            mean_sim = df_sim["time_min"].mean()
+            diff = abs(mean_sim - mean_exp)
+            if diff < best_diff:
+                best_diff = diff
+                best_idx = idx
+
+    conn_sim.close()
+    return best_idx
+
+
+@st.cache_data
 def load_sim_trapping_data(N, Pe, T, kappa):
     """Load simulation trapping times from database."""
     if not DB_SIM.exists():
@@ -195,6 +239,12 @@ def render_violin_comparison_tab():
                 f"Pe={p[0]:.2f}, T={p[1]:.2f}, κ={p[2]:.2f}" for p in common_params
             ]
 
+            # Get best default index for each temperature
+            default_indices = {
+                temp: get_best_params_for_temp(temp, tuple(common_params))
+                for temp in TEMPERATURES_EXP
+            }
+
             cols = st.columns(3)
             for i, temp in enumerate(TEMPERATURES_EXP):
                 with cols[i]:
@@ -205,6 +255,7 @@ def render_violin_comparison_tab():
                         idx = st.selectbox(
                             "Parameters",
                             options=range(len(param_options)),
+                            index=default_indices[temp],
                             format_func=lambda j, opts=param_options: opts[j],
                             key=f"violin_params_{temp}",
                         )
