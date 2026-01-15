@@ -17,6 +17,7 @@ NUMERIC_COLS = [
     "Pe",
     "T",
     "kappa",
+    "fa",
     "H_free",
     "lp_free",
     "lp_free_individual",
@@ -36,6 +37,7 @@ LATEX_LABELS = {
     "Pe": "Pe",
     "T": "T",
     "kappa": "κ",
+    "fa": "f<sub>a</sub>",
     "H_free": "H<sub>free</sub>",
     "lp_free": "ℓ<sub>p</sub> / L (corr, free)",
     "lp_free_individual": "ℓ<sub>p</sub> / L (indiv, free)",
@@ -52,14 +54,14 @@ LATEX_LABELS = {
 
 # Observable options for Tab 2
 OBSERVABLE_OPTIONS = [
-    "H_free", "lp_free", "lp_free_individual", "tau_decorr_free", "tau_decorr_cavity", "D_long",
+    "fa", "H_free", "lp_free", "lp_free_individual", "tau_decorr_free", "tau_decorr_cavity", "D_long",
     "H_conf", "lp_conf", "lp_conf_individual", "ttrap",
     "transloc_rate_per_hour", "transloc_success_rate"
 ]
 
 # X-axis parameter options for Tab 2
 X_PARAM_OPTIONS = [
-    "Pe", "kappa", "H_free", "H_conf", "lp_free", "lp_conf",
+    "Pe", "kappa", "fa", "H_free", "H_conf", "lp_free", "lp_conf",
     "tau_decorr_free", "tau_decorr_cavity",
     "transloc_rate_per_hour", "transloc_success_rate"
 ]

@@ -27,6 +27,7 @@ DB_SIM = Path(__file__).parent.parent / "trapping_times.db"
 
 # Constants
 MAX_TRAP_TIME = 10.0  # minutes
+MAX_TRANS_TIME = 25.0  # minutes (for translocation)
 TEMPERATURES_EXP = [10, 20, 30]  # Experimental temperatures in Celsius
 LENGTH_THRESHOLD = 2.0  # mm - for grouping worms with similar lengths
 
@@ -50,12 +51,55 @@ SIM_COLOR_MPL = "#FFA500"  # Orange
 
 @st.cache_data
 def load_exp_trapping_data():
-    """Load experimental data from local database."""
+    """Load experimental trapping data from local database."""
     if not DB_EXP.exists():
         return pd.DataFrame()
 
     conn = sqlite3.connect(DB_EXP)
     df = pd.read_sql("SELECT T_exp, length_mm, time_min FROM exp_trapping_events", conn)
+    conn.close()
+    return df
+
+
+@st.cache_data
+def load_exp_translocation_data():
+    """Load experimental translocation data from local database (success only)."""
+    if not DB_EXP.exists():
+        return pd.DataFrame()
+
+    conn = sqlite3.connect(DB_EXP)
+    try:
+        df = pd.read_sql(
+            "SELECT T_exp, length_mm, time_min FROM exp_translocation_events WHERE event_type = 'success'",
+            conn,
+        )
+    except Exception:
+        # Table might not exist
+        df = pd.DataFrame()
+    conn.close()
+    return df
+
+
+@st.cache_data
+def load_worm_metrics():
+    """Load per-worm metrics from database (for rate and success rate)."""
+    if not DB_EXP.exists():
+        return pd.DataFrame()
+
+    conn = sqlite3.connect(DB_EXP)
+    try:
+        df = pd.read_sql(
+            "SELECT T_exp, length_mm, obs_time_min, n_success, n_attempt FROM exp_worm_metrics",
+            conn,
+        )
+        # Compute derived metrics
+        df["trans_rate"] = (df["n_success"] / df["obs_time_min"]) * 60  # events/hour
+        df["success_rate"] = 100 * df["n_success"] / (df["n_success"] + df["n_attempt"])
+        # Handle divisions by zero
+        df["trans_rate"] = df["trans_rate"].fillna(0)
+        df["success_rate"] = df["success_rate"].fillna(0)
+    except Exception:
+        df = pd.DataFrame()
     conn.close()
     return df
 
@@ -156,10 +200,15 @@ def load_sim_trapping_data(N, Pe, T, kappa):
     return times
 
 
-def group_worms_by_length(df, threshold=2.0):
+def group_worms_by_length(df, threshold=2.0, min_events=1):
     """
     Group trapping events by worm length (within threshold mm).
     Returns list of (mean_length, times_list) tuples.
+
+    Args:
+        df: DataFrame with 'length_mm' and 'time_min' columns
+        threshold: Max length difference to group together (0 = no grouping)
+        min_events: Minimum events per group to include in output
     """
     if len(df) == 0:
         return []
@@ -185,8 +234,8 @@ def group_worms_by_length(df, threshold=2.0):
             else:
                 break
 
-        # Keep groups with >=3 events for violin
-        if len(current_group_times) >= 3:
+        # Keep groups with >= min_events
+        if len(current_group_times) >= min_events:
             mean_length = float(np.mean(current_group_lengths))
             grouped_data.append((mean_length, current_group_times))
 
@@ -201,8 +250,28 @@ def group_worms_by_length(df, threshold=2.0):
 
 
 def render_violin_comparison_tab():
-    """Render violin plots tab."""
-    st.header("Trapping time distributions vs length")
+    """Render violin plots tab with sub-tabs for all metrics."""
+    st.header("Time distributions vs length")
+
+    # Sub-tabs for all metrics
+    tab_trap, tab_trans, tab_rate, tab_success = st.tabs(["τ_trap", "τ_trans", "Rate", "Success %"])
+
+    with tab_trap:
+        _render_trapping_subtab()
+
+    with tab_trans:
+        _render_translocation_subtab()
+
+    with tab_rate:
+        _render_rate_subtab()
+
+    with tab_success:
+        _render_success_rate_subtab()
+
+
+def _render_trapping_subtab():
+    """Render trapping time violin plots (experimental + simulation)."""
+    st.subheader("Trapping time distributions")
     st.markdown(
         """
     Violin plots of experimental trapping times grouped by worm length,
@@ -269,24 +338,35 @@ def render_violin_comparison_tab():
 
     # Plot mode selection
     st.subheader("Plot options")
-    use_matplotlib = st.checkbox(
-        "Use matplotlib (static)", value=False, key="violin_matplotlib"
-    )
+    col_opt1, col_opt2 = st.columns(2)
+    with col_opt1:
+        use_matplotlib = st.checkbox(
+            "Use matplotlib (static)", value=False, key="violin_matplotlib"
+        )
+    with col_opt2:
+        use_length_tolerance = st.checkbox(
+            "Group similar lengths (±2mm)",
+            value=True,
+            key="violin_length_tolerance",
+            help="When enabled, worms within ±2mm are grouped. When disabled, each unique length is separate."
+        )
 
     # Mapping N to approximate length (mm)
     n_to_length = {40: 20, 50: 25, 60: 30}
+    length_threshold = LENGTH_THRESHOLD if use_length_tolerance else 0.0
 
     if use_matplotlib:
-        _render_matplotlib_figure(exp_data, selected_params_dict, n_to_length)
+        _render_matplotlib_figure(exp_data, selected_params_dict, n_to_length, length_threshold)
     else:
-        _render_plotly_figure(exp_data, selected_params_dict, n_to_length)
+        _render_plotly_figure(exp_data, selected_params_dict, n_to_length, length_threshold)
 
     # Statistics summary
     _render_statistics(exp_data, selected_params_dict)
 
 
-def _render_plotly_figure(exp_data, selected_params_dict, n_to_length):
+def _render_plotly_figure(exp_data, selected_params_dict, n_to_length, length_threshold=LENGTH_THRESHOLD):
     """Render interactive Plotly violin plots."""
+    min_events = 3 if length_threshold > 0 else 1  # Fewer required when no grouping
     # Create Plotly figure with 3 stacked subplots
     fig = make_subplots(
         rows=3,
@@ -303,12 +383,10 @@ def _render_plotly_figure(exp_data, selected_params_dict, n_to_length):
         df_temp = exp_data[exp_data["T_exp"] == temp]
 
         # Group by length
-        grouped = group_worms_by_length(df_temp, LENGTH_THRESHOLD)
+        grouped = group_worms_by_length(df_temp, length_threshold, min_events)
 
         # Plot experimental violins
         for g_idx, (mean_length, times_list) in enumerate(grouped):
-            if len(times_list) < 3:
-                continue
 
             fig.add_trace(
                 go.Violin(
@@ -407,8 +485,9 @@ def _render_plotly_figure(exp_data, selected_params_dict, n_to_length):
     st.plotly_chart(fig, use_container_width=True)
 
 
-def _render_matplotlib_figure(exp_data, selected_params_dict, n_to_length):
+def _render_matplotlib_figure(exp_data, selected_params_dict, n_to_length, length_threshold=LENGTH_THRESHOLD):
     """Render static matplotlib violin plots."""
+    min_events = 3 if length_threshold > 0 else 1
     fig, axes = plt.subplots(3, 1, figsize=(8, 8), sharex=True)
     fig.subplots_adjust(hspace=0)
 
@@ -422,7 +501,7 @@ def _render_matplotlib_figure(exp_data, selected_params_dict, n_to_length):
         df_temp = exp_data[exp_data["T_exp"] == temp]
 
         # Group by length
-        grouped = group_worms_by_length(df_temp, LENGTH_THRESHOLD)
+        grouped = group_worms_by_length(df_temp, length_threshold, min_events)
 
         if len(grouped) > 0:
             positions_exp = [g[0] for g in grouped]
@@ -566,8 +645,10 @@ def _render_statistics(exp_data, selected_params_dict):
             selected_params = selected_params_dict.get(temp)
             if selected_params is not None:
                 Pe, T_sim, kappa = selected_params
+                all_sim_times = []
                 for N in [40, 50, 60]:
                     sim_times = load_sim_trapping_data(N, Pe, T_sim, kappa)
+                    all_sim_times.extend(sim_times)
                     if len(sim_times) > 0:
                         stats_data.append(
                             {
@@ -578,6 +659,745 @@ def _render_statistics(exp_data, selected_params_dict):
                                 "Std (min)": f"{float(np.std(sim_times)):.2f}",
                             }
                         )
+                # Add combined stats (mean over all N) - this is what's used to find best params
+                if len(all_sim_times) > 0:
+                    stats_data.append(
+                        {
+                            "Source": f"**Sim T={temp}C (all N)** Pe={Pe:.2f}",
+                            "N events": len(all_sim_times),
+                            "Mean (min)": f"{float(np.mean(all_sim_times)):.2f}",
+                            "Median (min)": f"{float(np.median(all_sim_times)):.2f}",
+                            "Std (min)": f"{float(np.std(all_sim_times)):.2f}",
+                        }
+                    )
 
         if stats_data:
             st.dataframe(pd.DataFrame(stats_data), use_container_width=True)
+
+
+# =============================================================================
+# TRANSLOCATION SUBTAB
+# =============================================================================
+
+
+def _render_translocation_subtab():
+    """Render translocation time violin plots (experimental only)."""
+    st.subheader("Translocation time distributions")
+    st.markdown(
+        """
+    Violin plots of successful translocation times grouped by worm length.
+    Only successful translocations are shown.
+    """
+    )
+
+    # Check database
+    if not DB_EXP.exists():
+        st.error(f"Experimental database not found: {DB_EXP}")
+        st.info("Run `python collect_exp_translocation_data.py` to create the database.")
+        return
+
+    # Load translocation data
+    trans_data = load_exp_translocation_data()
+    if len(trans_data) == 0:
+        st.warning("No translocation data found.")
+        st.info("Run `python collect_exp_translocation_data.py` to populate the database.")
+        return
+
+    # Filter outliers
+    trans_data = trans_data[trans_data["time_min"] <= MAX_TRANS_TIME]
+
+    # Plot mode selection
+    use_matplotlib = st.checkbox(
+        "Use matplotlib (static)", value=False, key="trans_violin_matplotlib"
+    )
+
+    if use_matplotlib:
+        _render_translocation_matplotlib(trans_data)
+    else:
+        _render_translocation_plotly(trans_data)
+
+    # Statistics
+    _render_translocation_statistics(trans_data)
+
+
+def _render_translocation_plotly(trans_data):
+    """Render interactive Plotly violin plots for translocation."""
+    fig = make_subplots(
+        rows=3,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.02,
+        subplot_titles=["", "", ""],
+    )
+
+    for idx, temp in enumerate(TEMPERATURES_EXP):
+        row = idx + 1
+
+        # Filter data for this temperature
+        df_temp = trans_data[trans_data["T_exp"] == temp]
+
+        # Group by length
+        grouped = group_worms_by_length(df_temp, LENGTH_THRESHOLD)
+
+        # Plot violins
+        for g_idx, (mean_length, times_list) in enumerate(grouped):
+            if len(times_list) < 3:
+                continue
+
+            fig.add_trace(
+                go.Violin(
+                    y=times_list,
+                    x0=mean_length,
+                    name=f"Exp T={temp}°C" if g_idx == 0 and idx == 0 else None,
+                    legendgroup=f"exp_{temp}",
+                    showlegend=(g_idx == 0 and idx == 0),
+                    line_color=TEMP_COLORS_PLOTLY[temp].replace("0.5)", "1)"),
+                    fillcolor=TEMP_COLORS_PLOTLY[temp],
+                    opacity=0.8,
+                    meanline_visible=True,
+                    width=2.0,
+                    side="both",
+                    scalemode="width",
+                    points=False,
+                ),
+                row=row,
+                col=1,
+            )
+
+        # Add temperature annotation
+        fig.add_annotation(
+            x=38,
+            y=MAX_TRANS_TIME * 0.9,
+            text=f"T = {temp}°C",
+            showarrow=False,
+            font=dict(size=14),
+            bgcolor="white",
+            bordercolor="black",
+            borderwidth=1,
+            row=row,
+            col=1,
+        )
+
+    # Update layout
+    fig.update_layout(
+        height=600,
+        template="plotly_white",
+        font=dict(size=16),
+        showlegend=True,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
+        violinmode="overlay",
+        violingap=0,
+        violingroupgap=0,
+    )
+
+    # Update axes
+    for row in range(1, 4):
+        fig.update_yaxes(
+            title_text="τ_trans (min)" if row == 2 else "",
+            range=[0, MAX_TRANS_TIME],
+            row=row,
+            col=1,
+        )
+        fig.update_xaxes(range=[12, 40], row=row, col=1)
+
+    fig.update_xaxes(title_text="l_c (mm)", row=3, col=1)
+
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _render_translocation_matplotlib(trans_data):
+    """Render static matplotlib violin plots for translocation."""
+    fig, axes = plt.subplots(3, 1, figsize=(8, 8), sharex=True)
+    fig.subplots_adjust(hspace=0)
+
+    for idx, temp in enumerate(TEMPERATURES_EXP):
+        ax = axes[idx]
+
+        # Filter data for this temperature
+        df_temp = trans_data[trans_data["T_exp"] == temp]
+
+        # Group by length
+        grouped = group_worms_by_length(df_temp, LENGTH_THRESHOLD)
+
+        if len(grouped) > 0:
+            positions_exp = [g[0] for g in grouped]
+            data_exp = [g[1] for g in grouped]
+
+            # Plot violins
+            parts = ax.violinplot(
+                data_exp,
+                positions=positions_exp,
+                widths=1.5,
+                showmeans=True,
+                showmedians=True,
+                showextrema=False,
+            )
+
+            # Style violins
+            for pc in parts["bodies"]:
+                pc.set_facecolor(TEMP_COLORS_MPL[temp])
+                pc.set_alpha(0.5)
+                pc.set_edgecolor("black")
+                pc.set_linewidth(1)
+
+            parts["cmeans"].set_edgecolor("darkred")
+            parts["cmeans"].set_linewidth(2)
+            parts["cmedians"].set_edgecolor("darkblue")
+            parts["cmedians"].set_linewidth(2)
+
+        # Labels
+        if idx == 2:
+            ax.set_xlabel(r"$\ell_c$ (mm)", fontsize=16)
+        else:
+            ax.set_xlabel("")
+            ax.tick_params(labelbottom=False)
+
+        ax.set_ylabel(r"$\tau_{\rm trans}$ (min)", fontsize=16)
+        ax.tick_params(axis="both", labelsize=16)
+        ax.grid(True, alpha=0.3, linestyle="--")
+        ax.set_ylim(-1, None)
+
+        # Legend on top panel
+        if idx == 0:
+            legend_elements = [
+                Line2D([0], [0], color="darkred", linewidth=2, label="Mean"),
+                Line2D([0], [0], color="darkblue", linewidth=2, label="Median"),
+            ]
+            ax.legend(handles=legend_elements, loc="upper left", fontsize=12)
+
+        # Temperature annotation
+        ax.text(
+            0.95,
+            0.95,
+            f"$T={temp}^\\circ$C",
+            transform=ax.transAxes,
+            fontsize=12,
+            va="top",
+            ha="right",
+            bbox=dict(
+                boxstyle="round", facecolor="white", edgecolor="black", linewidth=1.5
+            ),
+        )
+
+    axes[2].set_xlim(12, 40)
+
+    plt.tight_layout()
+    st.pyplot(fig)
+    plt.close(fig)
+
+
+def _render_translocation_statistics(trans_data):
+    """Render translocation statistics summary table."""
+    with st.expander("Statistics"):
+        stats_data = []
+
+        for temp in TEMPERATURES_EXP:
+            df_temp = trans_data[trans_data["T_exp"] == temp]
+            if len(df_temp) > 0:
+                times = np.array(df_temp["time_min"].tolist())
+                stats_data.append(
+                    {
+                        "Source": f"Exp T={temp}C",
+                        "N events": len(df_temp),
+                        "Mean (min)": f"{float(np.mean(times)):.2f}",
+                        "Median (min)": f"{float(np.median(times)):.2f}",
+                        "Std (min)": f"{float(np.std(times)):.2f}",
+                    }
+                )
+
+        if stats_data:
+            st.dataframe(pd.DataFrame(stats_data), use_container_width=True)
+
+
+# =============================================================================
+# RATE SUBTAB
+# =============================================================================
+
+
+def _render_rate_subtab():
+    """Render translocation rate violin plots (per-worm)."""
+    st.subheader("Translocation rate distributions")
+    st.markdown(
+        """
+    Violin plots of translocation rates (events/hour) per worm, grouped by worm length.
+    Rate = (successful translocations / observation time) × 60
+    """
+    )
+
+    # Load worm metrics
+    metrics_data = load_worm_metrics()
+    if len(metrics_data) == 0:
+        st.warning("No worm metrics found.")
+        st.info("Run `python collect_exp_translocation_data.py` to populate the database.")
+        return
+
+    # Plot mode selection
+    use_matplotlib = st.checkbox(
+        "Use matplotlib (static)", value=False, key="rate_violin_matplotlib"
+    )
+
+    if use_matplotlib:
+        _render_rate_matplotlib(metrics_data)
+    else:
+        _render_rate_plotly(metrics_data)
+
+    # Statistics
+    _render_rate_statistics(metrics_data)
+
+
+def _render_rate_plotly(metrics_data):
+    """Render interactive Plotly violin plots for translocation rate."""
+    fig = make_subplots(
+        rows=3,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.02,
+        subplot_titles=["", "", ""],
+    )
+
+    for idx, temp in enumerate(TEMPERATURES_EXP):
+        row = idx + 1
+
+        # Filter data for this temperature
+        df_temp = metrics_data[metrics_data["T_exp"] == temp]
+
+        # Group by length (using trans_rate instead of time_min)
+        grouped = _group_by_length_generic(df_temp, "trans_rate", LENGTH_THRESHOLD)
+
+        # Plot violins
+        for g_idx, (mean_length, values_list) in enumerate(grouped):
+            if len(values_list) < 2:
+                continue
+
+            fig.add_trace(
+                go.Violin(
+                    y=values_list,
+                    x0=mean_length,
+                    name=f"T={temp}°C" if g_idx == 0 and idx == 0 else None,
+                    legendgroup=f"exp_{temp}",
+                    showlegend=(g_idx == 0 and idx == 0),
+                    line_color=TEMP_COLORS_PLOTLY[temp].replace("0.5)", "1)"),
+                    fillcolor=TEMP_COLORS_PLOTLY[temp],
+                    opacity=0.8,
+                    meanline_visible=True,
+                    width=2.0,
+                    side="both",
+                    scalemode="width",
+                    points=False,
+                ),
+                row=row,
+                col=1,
+            )
+
+        # Add temperature annotation
+        fig.add_annotation(
+            x=38,
+            y=12,
+            text=f"T = {temp}°C",
+            showarrow=False,
+            font=dict(size=14),
+            bgcolor="white",
+            bordercolor="black",
+            borderwidth=1,
+            row=row,
+            col=1,
+        )
+
+    # Update layout
+    fig.update_layout(
+        height=600,
+        template="plotly_white",
+        font=dict(size=16),
+        showlegend=True,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
+        violinmode="overlay",
+        violingap=0,
+        violingroupgap=0,
+    )
+
+    # Update axes
+    for row in range(1, 4):
+        fig.update_yaxes(
+            title_text="Rate (ev/h)" if row == 2 else "",
+            range=[0, None],
+            row=row,
+            col=1,
+        )
+        fig.update_xaxes(range=[12, 40], row=row, col=1)
+
+    fig.update_xaxes(title_text="l_c (mm)", row=3, col=1)
+
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _render_rate_matplotlib(metrics_data):
+    """Render static matplotlib violin plots for translocation rate."""
+    fig, axes = plt.subplots(3, 1, figsize=(8, 8), sharex=True)
+    fig.subplots_adjust(hspace=0)
+
+    for idx, temp in enumerate(TEMPERATURES_EXP):
+        ax = axes[idx]
+
+        # Filter data for this temperature
+        df_temp = metrics_data[metrics_data["T_exp"] == temp]
+
+        # Group by length
+        grouped = _group_by_length_generic(df_temp, "trans_rate", LENGTH_THRESHOLD)
+
+        if len(grouped) > 0:
+            positions = [g[0] for g in grouped]
+            data_list = [g[1] for g in grouped]
+
+            # Filter groups with at least 2 values
+            valid = [(p, d) for p, d in zip(positions, data_list) if len(d) >= 2]
+            if valid:
+                positions = [v[0] for v in valid]
+                data_list = [v[1] for v in valid]
+
+                parts = ax.violinplot(
+                    data_list,
+                    positions=positions,
+                    widths=1.5,
+                    showmeans=True,
+                    showmedians=True,
+                    showextrema=False,
+                )
+
+                for pc in parts["bodies"]:
+                    pc.set_facecolor(TEMP_COLORS_MPL[temp])
+                    pc.set_alpha(0.5)
+                    pc.set_edgecolor("black")
+                    pc.set_linewidth(1)
+
+                parts["cmeans"].set_edgecolor("darkred")
+                parts["cmeans"].set_linewidth(2)
+                parts["cmedians"].set_edgecolor("darkblue")
+                parts["cmedians"].set_linewidth(2)
+
+        if idx == 2:
+            ax.set_xlabel(r"$\ell_c$ (mm)", fontsize=16)
+        else:
+            ax.set_xlabel("")
+            ax.tick_params(labelbottom=False)
+
+        ax.set_ylabel("Rate (ev/h)", fontsize=16)
+        ax.tick_params(axis="both", labelsize=16)
+        ax.grid(True, alpha=0.3, linestyle="--")
+        ax.set_ylim(-1, None)
+
+        if idx == 0:
+            legend_elements = [
+                Line2D([0], [0], color="darkred", linewidth=2, label="Mean"),
+                Line2D([0], [0], color="darkblue", linewidth=2, label="Median"),
+            ]
+            ax.legend(handles=legend_elements, loc="upper left", fontsize=12)
+
+        ax.text(
+            0.95,
+            0.95,
+            f"$T={temp}^\\circ$C",
+            transform=ax.transAxes,
+            fontsize=12,
+            va="top",
+            ha="right",
+            bbox=dict(
+                boxstyle="round", facecolor="white", edgecolor="black", linewidth=1.5
+            ),
+        )
+
+    axes[2].set_xlim(12, 40)
+
+    plt.tight_layout()
+    st.pyplot(fig)
+    plt.close(fig)
+
+
+def _render_rate_statistics(metrics_data):
+    """Render rate statistics summary table."""
+    with st.expander("Statistics"):
+        stats_data = []
+
+        for temp in TEMPERATURES_EXP:
+            df_temp = metrics_data[metrics_data["T_exp"] == temp]
+            if len(df_temp) > 0:
+                rates = np.array(df_temp["trans_rate"].tolist())
+                stats_data.append(
+                    {
+                        "Source": f"T={temp}C",
+                        "N worms": len(df_temp),
+                        "Mean (ev/h)": f"{float(np.mean(rates)):.2f}",
+                        "Median (ev/h)": f"{float(np.median(rates)):.2f}",
+                        "Std (ev/h)": f"{float(np.std(rates)):.2f}",
+                    }
+                )
+
+        if stats_data:
+            st.dataframe(pd.DataFrame(stats_data), use_container_width=True)
+
+
+# =============================================================================
+# SUCCESS RATE SUBTAB
+# =============================================================================
+
+
+def _render_success_rate_subtab():
+    """Render success rate violin plots (per-worm)."""
+    st.subheader("Success rate distributions")
+    st.markdown(
+        """
+    Violin plots of translocation success rates (%) per worm, grouped by worm length.
+    Success rate = 100 × (successful / total events)
+    """
+    )
+
+    # Load worm metrics
+    metrics_data = load_worm_metrics()
+    if len(metrics_data) == 0:
+        st.warning("No worm metrics found.")
+        st.info("Run `python collect_exp_translocation_data.py` to populate the database.")
+        return
+
+    # Plot mode selection
+    use_matplotlib = st.checkbox(
+        "Use matplotlib (static)", value=False, key="success_violin_matplotlib"
+    )
+
+    if use_matplotlib:
+        _render_success_matplotlib(metrics_data)
+    else:
+        _render_success_plotly(metrics_data)
+
+    # Statistics
+    _render_success_statistics(metrics_data)
+
+
+def _render_success_plotly(metrics_data):
+    """Render interactive Plotly violin plots for success rate."""
+    fig = make_subplots(
+        rows=3,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.02,
+        subplot_titles=["", "", ""],
+    )
+
+    for idx, temp in enumerate(TEMPERATURES_EXP):
+        row = idx + 1
+
+        # Filter data for this temperature
+        df_temp = metrics_data[metrics_data["T_exp"] == temp]
+
+        # Group by length
+        grouped = _group_by_length_generic(df_temp, "success_rate", LENGTH_THRESHOLD)
+
+        # Plot violins
+        for g_idx, (mean_length, values_list) in enumerate(grouped):
+            if len(values_list) < 2:
+                continue
+
+            fig.add_trace(
+                go.Violin(
+                    y=values_list,
+                    x0=mean_length,
+                    name=f"T={temp}°C" if g_idx == 0 and idx == 0 else None,
+                    legendgroup=f"exp_{temp}",
+                    showlegend=(g_idx == 0 and idx == 0),
+                    line_color=TEMP_COLORS_PLOTLY[temp].replace("0.5)", "1)"),
+                    fillcolor=TEMP_COLORS_PLOTLY[temp],
+                    opacity=0.8,
+                    meanline_visible=True,
+                    width=2.0,
+                    side="both",
+                    scalemode="width",
+                    points=False,
+                ),
+                row=row,
+                col=1,
+            )
+
+        # Add temperature annotation
+        fig.add_annotation(
+            x=38,
+            y=90,
+            text=f"T = {temp}°C",
+            showarrow=False,
+            font=dict(size=14),
+            bgcolor="white",
+            bordercolor="black",
+            borderwidth=1,
+            row=row,
+            col=1,
+        )
+
+    # Update layout
+    fig.update_layout(
+        height=600,
+        template="plotly_white",
+        font=dict(size=16),
+        showlegend=True,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
+        violinmode="overlay",
+        violingap=0,
+        violingroupgap=0,
+    )
+
+    # Update axes
+    for row in range(1, 4):
+        fig.update_yaxes(
+            title_text="Success (%)" if row == 2 else "",
+            range=[0, 100],
+            row=row,
+            col=1,
+        )
+        fig.update_xaxes(range=[12, 40], row=row, col=1)
+
+    fig.update_xaxes(title_text="l_c (mm)", row=3, col=1)
+
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _render_success_matplotlib(metrics_data):
+    """Render static matplotlib violin plots for success rate."""
+    fig, axes = plt.subplots(3, 1, figsize=(8, 8), sharex=True)
+    fig.subplots_adjust(hspace=0)
+
+    for idx, temp in enumerate(TEMPERATURES_EXP):
+        ax = axes[idx]
+
+        # Filter data for this temperature
+        df_temp = metrics_data[metrics_data["T_exp"] == temp]
+
+        # Group by length
+        grouped = _group_by_length_generic(df_temp, "success_rate", LENGTH_THRESHOLD)
+
+        if len(grouped) > 0:
+            positions = [g[0] for g in grouped]
+            data_list = [g[1] for g in grouped]
+
+            # Filter groups with at least 2 values
+            valid = [(p, d) for p, d in zip(positions, data_list) if len(d) >= 2]
+            if valid:
+                positions = [v[0] for v in valid]
+                data_list = [v[1] for v in valid]
+
+                parts = ax.violinplot(
+                    data_list,
+                    positions=positions,
+                    widths=1.5,
+                    showmeans=True,
+                    showmedians=True,
+                    showextrema=False,
+                )
+
+                for pc in parts["bodies"]:
+                    pc.set_facecolor(TEMP_COLORS_MPL[temp])
+                    pc.set_alpha(0.5)
+                    pc.set_edgecolor("black")
+                    pc.set_linewidth(1)
+
+                parts["cmeans"].set_edgecolor("darkred")
+                parts["cmeans"].set_linewidth(2)
+                parts["cmedians"].set_edgecolor("darkblue")
+                parts["cmedians"].set_linewidth(2)
+
+        if idx == 2:
+            ax.set_xlabel(r"$\ell_c$ (mm)", fontsize=16)
+        else:
+            ax.set_xlabel("")
+            ax.tick_params(labelbottom=False)
+
+        ax.set_ylabel("Success (%)", fontsize=16)
+        ax.tick_params(axis="both", labelsize=16)
+        ax.grid(True, alpha=0.3, linestyle="--")
+        ax.set_ylim(-1, 100)
+
+        if idx == 0:
+            legend_elements = [
+                Line2D([0], [0], color="darkred", linewidth=2, label="Mean"),
+                Line2D([0], [0], color="darkblue", linewidth=2, label="Median"),
+            ]
+            ax.legend(handles=legend_elements, loc="upper left", fontsize=12)
+
+        ax.text(
+            0.95,
+            0.95,
+            f"$T={temp}^\\circ$C",
+            transform=ax.transAxes,
+            fontsize=12,
+            va="top",
+            ha="right",
+            bbox=dict(
+                boxstyle="round", facecolor="white", edgecolor="black", linewidth=1.5
+            ),
+        )
+
+    axes[2].set_xlim(12, 40)
+
+    plt.tight_layout()
+    st.pyplot(fig)
+    plt.close(fig)
+
+
+def _render_success_statistics(metrics_data):
+    """Render success rate statistics summary table."""
+    with st.expander("Statistics"):
+        stats_data = []
+
+        for temp in TEMPERATURES_EXP:
+            df_temp = metrics_data[metrics_data["T_exp"] == temp]
+            if len(df_temp) > 0:
+                rates = np.array(df_temp["success_rate"].tolist())
+                stats_data.append(
+                    {
+                        "Source": f"T={temp}C",
+                        "N worms": len(df_temp),
+                        "Mean (%)": f"{float(np.mean(rates)):.2f}",
+                        "Median (%)": f"{float(np.median(rates)):.2f}",
+                        "Std (%)": f"{float(np.std(rates)):.2f}",
+                    }
+                )
+
+        if stats_data:
+            st.dataframe(pd.DataFrame(stats_data), use_container_width=True)
+
+
+# =============================================================================
+# UTILITY FUNCTIONS
+# =============================================================================
+
+
+def _group_by_length_generic(df, value_column, threshold=2.0):
+    """
+    Group worms by length and return list of (mean_length, values_list) tuples.
+    Generic version that works for any value column.
+    """
+    if len(df) == 0:
+        return []
+
+    # Sort by length
+    df_sorted = df.sort_values("length_mm").reset_index(drop=True)
+
+    grouped_data = []
+    i = 0
+
+    while i < len(df_sorted):
+        current_length = df_sorted.iloc[i]["length_mm"]
+        current_group_lengths = [current_length]
+        current_group_values = [df_sorted.iloc[i][value_column]]
+
+        j = i + 1
+        while j < len(df_sorted):
+            next_length = df_sorted.iloc[j]["length_mm"]
+            if abs(next_length - current_length) <= threshold:
+                current_group_lengths.append(next_length)
+                current_group_values.append(df_sorted.iloc[j][value_column])
+                j += 1
+            else:
+                break
+
+        mean_length = float(np.mean(current_group_lengths))
+        grouped_data.append((mean_length, current_group_values))
+
+        i = j
+
+    return grouped_data

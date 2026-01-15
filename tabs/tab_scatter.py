@@ -23,16 +23,16 @@ def render_scatter_tab(df_filtered, df_exp):
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        x_var = st.selectbox("X-axis", NUMERIC_COLS, index=7)  # tau_decorr_cavity
+        x_var = st.selectbox("X-axis", NUMERIC_COLS, index=NUMERIC_COLS.index("tau_decorr_cavity"))
 
     with col2:
-        y_var = st.selectbox("Y-axis", NUMERIC_COLS, index=12)  # ttrap
+        y_var = st.selectbox("Y-axis", NUMERIC_COLS, index=NUMERIC_COLS.index("ttrap"))
 
     with col3:
         color_var = st.selectbox("Color by", ["None"] + NUMERIC_COLS, index=1)  # Pe
 
     with col4:
-        size_var = st.selectbox("Size by", ["None"] + NUMERIC_COLS, index=3)  # kappa
+        size_var = st.selectbox("Size by", ["None"] + NUMERIC_COLS, index=NUMERIC_COLS.index("kappa") + 1)
 
     # Plot options
     col_opt1, col_opt2, col_opt3 = st.columns(3)

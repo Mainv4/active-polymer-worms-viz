@@ -64,6 +64,8 @@ def load_data(data_source="freespace"):
     df["Pe"] = df["Pe"].round(2)
     df["T"] = df["T"].round(2)
     df["kappa"] = df["kappa"].round(2)
+    # Derive active force: fa = Pe * T (in LJ units where kB = σ = 1)
+    df["fa"] = df["Pe"] * df["T"]
     return df
 
 

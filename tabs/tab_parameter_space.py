@@ -28,7 +28,7 @@ def render_parameter_space_tab(df_filtered, df_exp):
     # Display mode selector
     display_mode = st.radio(
         "Display mode",
-        ["4 temperatures", "Single temperature"],
+        ["4 panels", "All temperatures", "Single temperature"],
         horizontal=True
     )
 
@@ -149,20 +149,23 @@ def render_parameter_space_tab(df_filtered, df_exp):
         secondary_param = secondary_link_param
         secondary_values = sorted(df_filtered[secondary_param].dropna().unique())
 
-    if display_mode == "4 temperatures":
-        _render_3_temps(df_filtered, observable, x_param, group_by, group_values,
-                        color_map, use_log_y, show_error_bars, show_secondary_lines,
-                        secondary_param, secondary_values, divide_y_tab2, y_divisor_tab2)
+    if display_mode == "4 panels":
+        _render_4_panels(df_filtered, observable, x_param, group_by, group_values,
+                         color_map, use_log_y, show_error_bars, show_secondary_lines,
+                         secondary_param, secondary_values, divide_y_tab2, y_divisor_tab2)
+    elif display_mode == "All temperatures":
+        _render_all_temps(df_filtered, observable, x_param, group_by, group_values,
+                          color_map, use_log_y, show_error_bars, divide_y_tab2, y_divisor_tab2)
     else:
         _render_single_temp(df_filtered, selected_temp, observable, x_param, group_by, group_values,
                             color_map, use_log_y, show_error_bars, show_secondary_lines,
                             secondary_param, secondary_values, divide_y_tab2, y_divisor_tab2)
 
 
-def _render_3_temps(df_filtered, observable, x_param, group_by, group_values,
-                    color_map, use_log_y, show_error_bars, show_secondary_lines,
-                    secondary_param, secondary_values, divide_y_tab2, y_divisor_tab2):
-    """Render 4-temperature mode with subplots."""
+def _render_4_panels(df_filtered, observable, x_param, group_by, group_values,
+                     color_map, use_log_y, show_error_bars, show_secondary_lines,
+                     secondary_param, secondary_values, divide_y_tab2, y_divisor_tab2):
+    """Render 4-panel mode with one subplot per temperature."""
     temps = [0.05, 0.1, 0.2, 0.3]
 
     fig = make_subplots(
@@ -315,6 +318,118 @@ def _render_3_temps(df_filtered, observable, x_param, group_by, group_values,
             fig.update_yaxes(title_text=y_label, row=1, col=col_idx)
         if use_log_y:
             fig.update_yaxes(type="log", row=1, col=col_idx)
+
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _render_all_temps(df_filtered, observable, x_param, group_by, group_values,
+                      color_map, use_log_y, show_error_bars, divide_y_tab2, y_divisor_tab2):
+    """Render all temperatures on the same plot, distinguished by symbols."""
+    temps = [0.05, 0.1, 0.2, 0.3]
+    # Different symbols for each temperature
+    TEMP_SYMBOLS = {0.05: "circle", 0.1: "square", 0.2: "diamond", 0.3: "triangle-up"}
+
+    fig = go.Figure()
+    obs_label = LATEX_LABELS.get(observable, observable)
+    divide_y_tab2_actual = divide_y_tab2
+    obs_display = observable
+
+    # Track which legends we've shown
+    shown_temp_legends = set()
+    shown_group_legends = set()
+
+    for temp in temps:
+        df_temp = df_filtered[abs(df_filtered["T"] - temp) < 0.01].copy()
+
+        if len(df_temp) == 0:
+            continue
+
+        for group_val in group_values:
+            tolerance = 0.001
+            df_group = df_temp[np.abs(df_temp[group_by] - group_val) < tolerance].copy()
+
+            if len(df_group) == 0:
+                continue
+
+            df_group = df_group[
+                np.isfinite(df_group[x_param]) &
+                np.isfinite(df_group[observable])
+            ].copy()
+
+            if len(df_group) == 0:
+                continue
+
+            df_group = df_group.sort_values(x_param).reset_index(drop=True)
+
+            obs_col_plot = observable
+
+            if divide_y_tab2 and y_divisor_tab2 == observable:
+                if temp == temps[0] and group_val == group_values[0]:
+                    st.warning("⚠️ Cannot divide Y-axis by itself. Division disabled.")
+                divide_y_tab2_actual = False
+            else:
+                divide_y_tab2_actual = divide_y_tab2
+
+            if divide_y_tab2_actual and y_divisor_tab2 != observable:
+                if y_divisor_tab2 in df_group.columns:
+                    obs_col_plot = f"{observable}_divided"
+                    df_group[obs_col_plot] = df_group[observable] / df_group[y_divisor_tab2].replace(0, np.nan)
+                    obs_display = f"{observable} / {y_divisor_tab2}"
+                    obs_label = f"{LATEX_LABELS.get(observable, observable)} / {LATEX_LABELS.get(y_divisor_tab2, y_divisor_tab2)}"
+                    df_group = df_group[np.isfinite(df_group[obs_col_plot])].copy()
+
+            error_y_dict = None
+            if show_error_bars and observable in ERROR_COLUMNS:
+                error_col_y = ERROR_COLUMNS[observable]
+                if error_col_y in df_group.columns:
+                    error_values_y = df_group[error_col_y].fillna(0).values
+                    if np.any(error_values_y > 0):
+                        error_y_dict = dict(type='data', array=error_values_y, visible=True)
+
+            # Determine legend display
+            # Show in legend if first occurrence of this (temp, group) combination
+            show_legend = (temp, group_val) not in shown_temp_legends
+            shown_temp_legends.add((temp, group_val))
+
+            fig.add_trace(
+                go.Scatter(
+                    x=df_group[x_param],
+                    y=df_group[obs_col_plot],
+                    mode="lines+markers",
+                    name=f"T={temp}, {group_by}={group_val}",
+                    line=dict(color=color_map[group_val], width=2),
+                    marker=dict(
+                        symbol=TEMP_SYMBOLS[temp],
+                        size=10,
+                        color=color_map[group_val],
+                        line=dict(width=1, color="black")
+                    ),
+                    error_y=error_y_dict,
+                    connectgaps=True,
+                    showlegend=show_legend,
+                    legendgroup=f"{temp}_{group_val}",
+                    customdata=np.column_stack((df_group['Pe'], df_group['T'], df_group['kappa'])),
+                    hovertemplate='<b>Pe</b>: %{customdata[0]:.2f}<br>' +
+                                  '<b>T</b>: %{customdata[1]:.2f}<br>' +
+                                  '<b>κ</b>: %{customdata[2]:.2f}<br>' +
+                                  f'<b>{x_param}</b>: %{{x:.4f}}<br>' +
+                                  f'<b>{obs_display}</b>: %{{y:.4f}}<extra></extra>',
+                )
+            )
+
+    fig.update_layout(
+        title="All temperatures (symbols: ● T=0.05, ■ T=0.1, ◆ T=0.2, ▲ T=0.3)",
+        xaxis_title=x_param,
+        yaxis_title=obs_label if divide_y_tab2_actual else LATEX_LABELS.get(observable, observable),
+        height=600,
+        template="plotly_white",
+        font=dict(size=12),
+        showlegend=True,
+        legend=dict(orientation="v", yanchor="top", y=1.0, xanchor="left", x=1.02)
+    )
+
+    if use_log_y:
+        fig.update_yaxes(type="log")
 
     st.plotly_chart(fig, use_container_width=True)
 
