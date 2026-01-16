@@ -363,6 +363,9 @@ def _render_trapping_subtab():
     # Statistics summary
     _render_statistics(exp_data, selected_params_dict)
 
+    # Export section
+    _render_export_section(exp_data, selected_params_dict, length_threshold)
+
 
 def _render_plotly_figure(exp_data, selected_params_dict, n_to_length, length_threshold=LENGTH_THRESHOLD):
     """Render interactive Plotly violin plots."""
@@ -673,6 +676,153 @@ def _render_statistics(exp_data, selected_params_dict):
 
         if stats_data:
             st.dataframe(pd.DataFrame(stats_data), use_container_width=True)
+
+
+def _render_export_section(exp_data, selected_params_dict, length_threshold):
+    """Render export expander for violin plot with matplotlib figure download."""
+    from utils.export_matplotlib import (
+        setup_latex_style,
+        create_violin_figure_mpl,
+        create_violin_export_zip,
+    )
+
+    with st.expander("📥 Export matplotlib figure"):
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            layout_choice = st.radio(
+                "Layout",
+                ["Three panels (stacked)", "Single temperature"],
+                key="violin_export_layout"
+            )
+
+        with col2:
+            if layout_choice == "Single temperature":
+                selected_temp = st.selectbox(
+                    "Temperature",
+                    TEMPERATURES_EXP,
+                    format_func=lambda t: f"{t}°C",
+                    key="violin_export_temp"
+                )
+            else:
+                selected_temp = None
+
+        with col3:
+            fig_format = st.selectbox(
+                "Format",
+                ["pdf", "png", "svg"],
+                key="violin_export_format"
+            )
+            use_latex = st.checkbox("Use LaTeX", value=True, key="violin_export_latex")
+
+        include_simulation = st.checkbox(
+            "Include simulation data",
+            value=any(p is not None for p in selected_params_dict.values()),
+            key="violin_export_include_sim",
+            help="Include simulation violin overlays in the export"
+        )
+
+        if st.button("Generate export", key="violin_export_btn"):
+            with st.spinner("Generating figure..."):
+                try:
+                    # Setup LaTeX style
+                    setup_latex_style(use_latex=use_latex)
+
+                    # Prepare grouped data for each temperature
+                    min_events = 3 if length_threshold > 0 else 1
+                    grouped_data_by_temp = {}
+                    exp_data_dict = {}
+
+                    for temp in TEMPERATURES_EXP:
+                        df_temp = exp_data[exp_data["T_exp"] == temp]
+                        grouped = group_worms_by_length(df_temp, length_threshold, min_events)
+                        grouped_data_by_temp[temp] = grouped
+
+                        # Store raw data for export
+                        exp_data_dict[temp] = {
+                            'times': np.array(df_temp["time_min"].tolist()),
+                            'lengths': np.array(df_temp["length_mm"].tolist()),
+                        }
+
+                    # Prepare simulation data if enabled
+                    sim_data = None
+                    sim_params = None
+
+                    if include_simulation:
+                        sim_data = {}
+                        sim_params = {}
+                        n_to_length = {40: 20, 50: 25, 60: 30}
+
+                        for temp, params in selected_params_dict.items():
+                            if params is not None:
+                                Pe, T_sim, kappa = params
+                                sim_params[temp] = params
+                                sim_data[temp] = {}
+
+                                for N in n_to_length.keys():
+                                    sim_times = load_sim_trapping_data(N, Pe, T_sim, kappa)
+                                    if len(sim_times) >= 3:
+                                        sim_data[temp][N] = sim_times
+
+                    # Determine layout
+                    layout = "single" if layout_choice == "Single temperature" else "stacked"
+
+                    # Create figure
+                    fig, _ = create_violin_figure_mpl(
+                        grouped_data_by_temp,
+                        layout=layout,
+                        selected_temp=selected_temp,
+                        sim_data=sim_data if include_simulation else None,
+                        sim_params=sim_params if include_simulation else None,
+                        length_threshold=length_threshold,
+                    )
+
+                    # Show preview
+                    st.pyplot(fig)
+
+                    # Prepare config for export
+                    if layout == "single" and selected_temp is not None:
+                        temps_for_export = [selected_temp]
+                    else:
+                        temps_for_export = TEMPERATURES_EXP
+
+                    config = {
+                        'layout': layout,
+                        'temperatures': temps_for_export,
+                        'length_threshold': length_threshold,
+                        'use_latex': use_latex,
+                    }
+
+                    # Filter exp_data_dict to only include exported temperatures
+                    exp_data_export = {t: exp_data_dict[t] for t in temps_for_export}
+
+                    # Create ZIP
+                    zip_bytes = create_violin_export_zip(
+                        fig,
+                        exp_data_export,
+                        config,
+                        sim_data_dict=sim_data if include_simulation else None,
+                        sim_params=sim_params if include_simulation else None,
+                        fig_format=fig_format,
+                    )
+
+                    # Provide download button
+                    from datetime import datetime
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    st.download_button(
+                        label="📦 Download ZIP archive",
+                        data=zip_bytes,
+                        file_name=f"violin_trapping_export_{timestamp}.zip",
+                        mime="application/zip",
+                        key="violin_download_btn",
+                    )
+
+                    plt.close(fig)
+
+                except Exception as e:
+                    st.error(f"Error generating figure: {e}")
+                    import traceback
+                    st.code(traceback.format_exc())
 
 
 # =============================================================================

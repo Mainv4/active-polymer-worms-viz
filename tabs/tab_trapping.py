@@ -193,7 +193,7 @@ def load_exp_trapping_data():
     return df
 
 
-def _render_publication_style_figure(exp_data_filtered, n_bins, max_cutoff, normalize, fit_options, use_log_y):
+def _render_publication_style_figure(exp_data_filtered, n_bins, max_cutoff, normalize, fit_options, use_log_y, use_log_bins=False):
     """Render publication-style figure with overlay distributions and τ vs T plot.
 
     Uses the same parameters as Histograms mode for consistency.
@@ -205,7 +205,7 @@ def _render_publication_style_figure(exp_data_filtered, n_bins, max_cutoff, norm
     TEMP_SYMBOLS = {10: "square", 20: "circle", 30: "triangle-up"}
 
     # Use user-controlled bins (same as Histograms mode)
-    bins = np.linspace(0, max_cutoff, n_bins + 1)
+    bins = _make_bins(max_cutoff, n_bins, use_log_bins)
 
     # Compute statistics for each temperature using both fit methods
     stats = {}
@@ -438,6 +438,156 @@ def _render_publication_style_figure(exp_data_filtered, n_bins, max_cutoff, norm
     st.dataframe(pd.DataFrame(stats_data), use_container_width=True)
 
 
+def _make_bins(max_cutoff, n_bins, use_log_bins):
+    """Create histogram bin edges, either linear or logarithmic."""
+    if use_log_bins:
+        # Log-spaced bins: start from small positive value to avoid log(0)
+        return np.logspace(np.log10(0.05), np.log10(max_cutoff), n_bins + 1)
+    else:
+        return np.linspace(0, max_cutoff, n_bins + 1)
+
+
+def _render_by_length_figure(exp_data_filtered, temp, n_bins, max_cutoff,
+                              normalize, fit_options, use_log_y, use_log_bins):
+    """Render distributions grouped by worm contour length.
+
+    Creates a publication-style figure with scatter points for each length class
+    and exponential fits, similar to the reference figure.
+    """
+    # Length class definitions (based on reference figure)
+    # Use ASCII labels for keys, convert to LaTeX when rendering
+    LENGTH_CLASSES = [
+        (10, 21, "lc: 10-21 mm", "#a8e6cf"),   # light green
+        (23, 27, "lc: 23-27 mm", "#64b5f6"),   # medium blue
+        (27, 34, "lc: 27-34 mm", "#1a237e"),   # dark blue
+    ]
+
+    fig = go.Figure()
+
+    # Filter by temperature
+    df_temp = exp_data_filtered[exp_data_filtered["T_exp"] == temp]
+
+    if len(df_temp) == 0:
+        st.warning(f"No data for T={temp}°C after filtering.")
+        return
+
+    # Create bins
+    bins = _make_bins(max_cutoff, n_bins, use_log_bins)
+
+    stats_data = []
+
+    for l_min, l_max, label, color in LENGTH_CLASSES:
+        # Filter by length
+        df_length = df_temp[(df_temp["length_mm"] >= l_min) &
+                            (df_temp["length_mm"] < l_max)]
+        times = np.array(df_length["time_min"].tolist())
+
+        if len(times) < 5:
+            continue
+
+        # Create histogram and extract scatter points
+        counts, bin_edges = np.histogram(times, bins=bins, density=normalize)
+        bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+        mask = counts > 0
+
+        # Scatter points for histogram
+        fig.add_trace(
+            go.Scatter(
+                x=bin_centers[mask],
+                y=counts[mask],
+                mode="markers",
+                name=label,
+                marker=dict(
+                    size=14,
+                    color=color,
+                    opacity=0.8,
+                    line=dict(width=1, color="black")
+                ),
+                legendgroup=label,
+            )
+        )
+
+        # Exponential fits
+        tau_log, tau_log_error, A_log = None, None, None
+        tau_pdf, tau_pdf_error = None, None
+
+        if "Log-space fit" in fit_options and len(times) >= 10:
+            tau_log, tau_log_error, A_log = fit_exponential_log_space(times, bins)
+            if tau_log is not None:
+                x_fit = np.linspace(0.01, max_cutoff, 200)
+                y_fit = A_log * np.exp(-x_fit / tau_log)
+                fig.add_trace(
+                    go.Scatter(
+                        x=x_fit,
+                        y=y_fit,
+                        mode="lines",
+                        name=f"τ={tau_log:.2f} min",
+                        line=dict(color=color, dash="dash", width=2),
+                        legendgroup=label,
+                        showlegend=True,
+                    )
+                )
+
+        if "Direct fit" in fit_options and len(times) >= 10:
+            tau_pdf, tau_pdf_error = fit_exponential(times, n_bins, max_cutoff)
+            if tau_pdf is not None:
+                x_fit = np.linspace(0.01, max_cutoff, 200)
+                # Estimate amplitude from histogram
+                a_fit = max(counts) if len(counts) > 0 else 1
+                y_fit = exponential_decay(x_fit, a_fit, tau_pdf)
+                fig.add_trace(
+                    go.Scatter(
+                        x=x_fit,
+                        y=y_fit,
+                        mode="lines",
+                        name=f"τ_pdf={tau_pdf:.2f} min",
+                        line=dict(color=color, dash="dot", width=2),
+                        legendgroup=label,
+                        showlegend=True,
+                    )
+                )
+
+        # Collect statistics
+        mean_val = float(np.mean(times))
+        se_mean = mean_val / np.sqrt(len(times))
+        stats_data.append({
+            "Length class": label,
+            "N events": len(times),
+            "⟨τ⟩ (min)": f"{mean_val:.2f} ± {se_mean:.2f}",
+            "τ (log-space)": f"{tau_log:.2f} ± {tau_log_error:.2f}" if tau_log else "N/A",
+            "τ (direct)": f"{tau_pdf:.2f} ± {tau_pdf_error:.2f}" if tau_pdf else "N/A",
+        })
+
+    # Update layout
+    fig.update_layout(
+        title=f"T = {temp}°C - Distribution by worm length",
+        xaxis_title="τ_tr (min)",
+        yaxis_title="P(τ_tr)" if normalize else "Count",
+        height=550,
+        template="plotly_white",
+        showlegend=True,
+        legend=dict(
+            orientation="v",
+            yanchor="top",
+            y=0.99,
+            xanchor="left",
+            x=1.02,
+            font=dict(size=11)
+        ),
+    )
+
+    if use_log_y:
+        fig.update_yaxes(type="log")
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Statistics table
+    if stats_data:
+        st.markdown("### Statistics by length class")
+        import pandas as pd
+        st.dataframe(pd.DataFrame(stats_data), use_container_width=True)
+
+
 def _render_exp_trapping_subtab():
     """Render experimental trapping time distributions (all lengths combined)."""
     st.subheader("Experimental trapping time distributions")
@@ -453,7 +603,7 @@ def _render_exp_trapping_subtab():
     # Display mode selector
     display_mode = st.radio(
         "Display mode",
-        ["Histograms", "Summary"],
+        ["Histograms", "By length", "Summary"],
         horizontal=True,
         key="exp_trap_display_mode"
     )
@@ -480,7 +630,7 @@ def _render_exp_trapping_subtab():
             help="Log-space: régression linéaire sur log(P), robuste. Direct: fit sur P(τ) en échelle linéaire."
         )
 
-    col_ctrl5, col_ctrl6, col_ctrl7, _ = st.columns(4)
+    col_ctrl5, col_ctrl6, col_ctrl7, col_ctrl8 = st.columns(4)
     with col_ctrl5:
         use_log_y = st.checkbox("Log scale (Y-axis)", value=False, key="exp_trap_log_y")
 
@@ -488,6 +638,10 @@ def _render_exp_trapping_subtab():
         show_mean = st.checkbox("Show mean line", value=True, key="exp_trap_mean")
 
     with col_ctrl7:
+        use_log_bins = st.checkbox("Log-spaced bins", value=False, key="exp_trap_log_bins",
+                                    help="Use logarithmically spaced bins instead of linear")
+
+    with col_ctrl8:
         temp_selected = st.selectbox(
             "Temperature",
             options=["All"] + TEMPERATURES_EXP,
@@ -500,9 +654,114 @@ def _render_exp_trapping_subtab():
     # Filter by cutoff
     exp_data_filtered = exp_data[exp_data["time_min"] <= max_cutoff]
 
+    # Export section
+    with st.expander("📥 Export matplotlib figure"):
+        col_exp1, col_exp2 = st.columns(2)
+        with col_exp1:
+            fig_format = st.selectbox(
+                "Figure format",
+                ["pdf", "png", "svg"],
+                index=0,
+                key="exp_trap_fig_format"
+            )
+        with col_exp2:
+            try_latex = st.checkbox("Use LaTeX rendering", value=True, key="exp_trap_latex",
+                                     help="Requires LaTeX installation (texlive)")
+
+        if st.button("Generate matplotlib figure", key="exp_trap_generate"):
+            from datetime import datetime
+            from utils.export_matplotlib import (
+                setup_latex_style, create_trapping_histogram_mpl,
+                create_by_length_figure_mpl, create_export_zip
+            )
+
+            # Setup style
+            setup_latex_style(use_latex=try_latex)
+
+            # Prepare data based on current display mode
+            bins = _make_bins(max_cutoff, n_bins, use_log_bins)
+
+            if display_mode == "By length":
+                # By length mode
+                temp_for_export = st.session_state.get("exp_trap_temp_by_length", 20)
+                df_temp = exp_data_filtered[exp_data_filtered["T_exp"] == temp_for_export]
+
+                LENGTH_CLASSES = [
+                    (10, 21, "lc: 10-21 mm"),
+                    (23, 27, "lc: 23-27 mm"),
+                    (27, 34, "lc: 27-34 mm"),
+                ]
+
+                times_by_length = {}
+                for l_min, l_max, label in LENGTH_CLASSES:
+                    df_length = df_temp[(df_temp["length_mm"] >= l_min) &
+                                        (df_temp["length_mm"] < l_max)]
+                    if len(df_length) >= 5:
+                        times_by_length[label] = np.array(df_length["time_min"].tolist())
+
+                fig_mpl, ax = create_by_length_figure_mpl(
+                    times_by_length, bins, normalize=normalize,
+                    use_log_y=use_log_y, temp=temp_for_export
+                )
+                times_dict = times_by_length
+            else:
+                # Standard histogram mode (all temperatures)
+                times_dict = {}
+                for temp in TEMPERATURES_EXP:
+                    df_temp = exp_data_filtered[exp_data_filtered["T_exp"] == temp]
+                    times_dict[temp] = np.array(df_temp["time_min"].tolist())
+
+                fig_mpl, ax = create_trapping_histogram_mpl(
+                    times_dict, bins, normalize=normalize,
+                    use_log_y=use_log_y
+                )
+
+            # Show preview
+            st.pyplot(fig_mpl)
+
+            # Prepare config for export
+            config = {
+                "n_bins": n_bins,
+                "max_cutoff": max_cutoff,
+                "use_log_bins": use_log_bins,
+                "normalize": normalize,
+                "use_log_y": use_log_y,
+                "display_mode": display_mode,
+                "generated_at": datetime.now().isoformat(),
+            }
+
+            # Create ZIP
+            zip_bytes = create_export_zip(fig_mpl, times_dict, config, fig_format=fig_format)
+
+            # Download button
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            st.download_button(
+                label=f"⬇️ Download ZIP ({fig_format.upper()} + NPY + script)",
+                data=zip_bytes,
+                file_name=f"trapping_export_{timestamp}.zip",
+                mime="application/zip",
+                key="exp_trap_download"
+            )
+
+            plt.close(fig_mpl)  # Clean up
+
     # Publication style view
     if display_mode == "Summary":
-        _render_publication_style_figure(exp_data_filtered, n_bins, max_cutoff, normalize, fit_options, use_log_y)
+        _render_publication_style_figure(exp_data_filtered, n_bins, max_cutoff, normalize, fit_options, use_log_y, use_log_bins)
+        return
+
+    # By length view
+    if display_mode == "By length":
+        # Need to select a single temperature for this view
+        temp_for_length = st.selectbox(
+            "Select temperature for length analysis",
+            TEMPERATURES_EXP,
+            index=1,  # Default to 20°C
+            format_func=lambda x: f"{x}°C",
+            key="exp_trap_temp_by_length"
+        )
+        _render_by_length_figure(exp_data_filtered, temp_for_length, n_bins, max_cutoff,
+                                  normalize, fit_options, use_log_y, use_log_bins)
         return
 
     if temp_selected == "All":
@@ -524,24 +783,43 @@ def _render_exp_trapping_subtab():
             if len(times) == 0:
                 continue
 
-            # Histogram
-            fig.add_trace(
-                go.Histogram(
-                    x=times,
-                    nbinsx=n_bins,
-                    histnorm=histnorm,
-                    name=f"T={temp}°C (N={len(times)})",
-                    marker_color=TEMP_COLORS_MPL[temp],
-                    opacity=0.7,
-                    showlegend=True,
-                ),
-                row=1, col=col_idx
-            )
+            # Create bins for this temperature
+            bins = _make_bins(max_cutoff, n_bins, use_log_bins)
+
+            # Histogram - use Bar for log bins, Histogram for linear
+            if use_log_bins:
+                counts, bin_edges = np.histogram(times, bins=bins, density=normalize)
+                bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+                bin_widths = np.diff(bin_edges)
+                fig.add_trace(
+                    go.Bar(
+                        x=bin_centers,
+                        y=counts,
+                        width=bin_widths,
+                        name=f"T={temp}°C (N={len(times)})",
+                        marker_color=TEMP_COLORS_MPL[temp],
+                        opacity=0.7,
+                        showlegend=True,
+                    ),
+                    row=1, col=col_idx
+                )
+            else:
+                fig.add_trace(
+                    go.Histogram(
+                        x=times,
+                        nbinsx=n_bins,
+                        histnorm=histnorm,
+                        name=f"T={temp}°C (N={len(times)})",
+                        marker_color=TEMP_COLORS_MPL[temp],
+                        opacity=0.7,
+                        showlegend=True,
+                    ),
+                    row=1, col=col_idx
+                )
 
             # Fit estimates
             mean_val = float(np.mean(times))
             x_fit = np.linspace(0.01, max_cutoff, 200)
-            bins = np.linspace(0, max_cutoff, n_bins + 1)
 
             # 1. Log-space fit
             if "Log-space fit" in fit_options and len(times) >= 10:
@@ -626,19 +904,35 @@ def _render_exp_trapping_subtab():
         fig = go.Figure()
         histnorm = "probability density" if normalize else None
 
-        fig.add_trace(go.Histogram(
-            x=times,
-            nbinsx=n_bins,
-            histnorm=histnorm,
-            name=f"T={temp_selected}°C (N={len(times)})",
-            marker_color=TEMP_COLORS_MPL[temp_selected],
-            opacity=0.7
-        ))
+        # Create bins
+        bins = _make_bins(max_cutoff, n_bins, use_log_bins)
+
+        # Histogram - use Bar for log bins, Histogram for linear
+        if use_log_bins:
+            counts_hist, bin_edges = np.histogram(times, bins=bins, density=normalize)
+            bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+            bin_widths = np.diff(bin_edges)
+            fig.add_trace(go.Bar(
+                x=bin_centers,
+                y=counts_hist,
+                width=bin_widths,
+                name=f"T={temp_selected}°C (N={len(times)})",
+                marker_color=TEMP_COLORS_MPL[temp_selected],
+                opacity=0.7
+            ))
+        else:
+            fig.add_trace(go.Histogram(
+                x=times,
+                nbinsx=n_bins,
+                histnorm=histnorm,
+                name=f"T={temp_selected}°C (N={len(times)})",
+                marker_color=TEMP_COLORS_MPL[temp_selected],
+                opacity=0.7
+            ))
 
         # Fit estimates
         mean_val = float(np.mean(times))
         x_fit = np.linspace(0.01, max_cutoff, 200)
-        bins = np.linspace(0, max_cutoff, n_bins + 1)
 
         # Track fit results for statistics
         tau_log, tau_log_error = None, None
@@ -713,7 +1007,7 @@ def _render_exp_trapping_subtab():
             times = np.array(df_temp["time_min"].tolist())
             mean_val = float(np.mean(times))
             se_mean = mean_val / np.sqrt(len(times))
-            bins = np.linspace(0, max_cutoff, n_bins + 1)
+            bins = _make_bins(max_cutoff, n_bins, use_log_bins)
 
             # Compute both fits
             tau_log, tau_log_error, _ = fit_exponential_log_space(times, bins) if "Log-space fit" in fit_options else (None, None, None)
