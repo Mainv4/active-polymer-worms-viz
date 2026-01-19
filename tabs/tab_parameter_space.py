@@ -48,14 +48,14 @@ def render_parameter_space_tab(df_filtered, df_exp):
         observable = st.selectbox(
             "Observable (Y-axis)",
             OBSERVABLE_OPTIONS,
-            index=9  # ttrap
+            index=10  # ttrap
         )
 
     with col2:
         x_param = st.selectbox(
             "X-axis Parameter",
             X_PARAM_OPTIONS,
-            index=7  # tau_decorr_cavity
+            index=8  # tau_decorr_cavity
         )
 
     with col3:

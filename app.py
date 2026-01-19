@@ -19,6 +19,7 @@ from tabs.tab_parameter_space import render_parameter_space_tab
 from tabs.tab_trapping import render_trapping_tab
 from tabs.tab_tau_params import render_tau_params_tab
 from tabs.tab_violin_comparison import render_violin_comparison_tab
+from tabs.tab_rotational import render_rotational_tab
 from utils.constants import NUMERIC_COLS
 
 # =============================================================================
@@ -203,12 +204,13 @@ st.sidebar.info(f"**{len(df_filtered)}** / {len(df)} points displayed")
 # MAIN PANEL - TABS
 # =============================================================================
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📈 Scatter Correlations",
     "📊 Parameter Space",
     "📉 Trapping Distributions",
     "⏱️ τ_trap vs Parameters",
-    "💧 violin plots τ_trap"
+    "💧 violin plots τ_trap",
+    "🔄 Rotational Number"
 ])
 
 with tab1:
@@ -226,6 +228,9 @@ with tab4:
 
 with tab5:
     render_violin_comparison_tab()
+
+with tab6:
+    render_rotational_tab(df_exp)
 
 # =============================================================================
 # DATA TABLE
