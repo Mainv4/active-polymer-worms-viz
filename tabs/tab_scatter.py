@@ -8,7 +8,61 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from utils.constants import LATEX_LABELS, NUMERIC_COLS, EXP_TEMP_COLORS
+from utils.constants import LATEX_LABELS, NUMERIC_COLS, EXP_TEMP_COLORS, ERROR_COLUMNS
+from tabs.tab_trapping import (
+    compute_ttrap_for_scatter,
+    load_all_trapping_times_by_params,
+    load_exp_trapping_data,
+)
+
+def _render_ttrap_sidebar():
+    """Render τ_trap histogram settings in the sidebar. Returns config dict."""
+    with st.sidebar.expander("τ_trap histogram settings", expanded=False):
+        method = st.radio(
+            "τ_trap value",
+            ["Mean", "Fit (τ_c)"],
+            index=0,
+            key="ttrap_sidebar_method",
+            help="Mean: average of trapping events. Fit: characteristic time from exponential fit.",
+        )
+        fit_type = "Log-space"
+        if method == "Fit (τ_c)":
+            fit_type = st.radio(
+                "Fit method",
+                ["Log-space", "Direct"],
+                index=0,
+                key="ttrap_sidebar_fit_type",
+                help="Log-space: linear regression on log(P), robust. Direct: fit on P(τ).",
+                horizontal=True,
+            )
+        max_cutoff = st.slider(
+            "Max τ cutoff (min)", 0.5, 30.0, 15.0, step=0.5,
+            key="ttrap_sidebar_cutoff",
+        )
+        n_bins = st.slider(
+            "Number of bins", 5, 100, 30,
+            key="ttrap_sidebar_bins",
+            disabled=(method == "Mean"),
+        )
+        use_log_bins = st.checkbox(
+            "Log-spaced bins", value=False,
+            key="ttrap_sidebar_log_bins",
+            disabled=(method == "Mean"),
+            help="Use logarithmically spaced bins instead of linear",
+        )
+
+    # Map to internal method names used by compute_ttrap_for_scatter
+    if method == "Fit (τ_c)":
+        internal_method = f"τ_c ({fit_type.lower()})" if fit_type == "Log-space" else "τ_c (direct fit)"
+    else:
+        internal_method = "Mean"
+
+    return {
+        "method": internal_method,
+        "n_bins": n_bins,
+        "max_cutoff": max_cutoff,
+        "use_log_bins": use_log_bins,
+    }
 
 
 def render_scatter_tab(df_filtered, df_exp):
@@ -34,8 +88,16 @@ def render_scatter_tab(df_filtered, df_exp):
     with col4:
         size_var = st.selectbox("Size by", ["None"] + NUMERIC_COLS, index=NUMERIC_COLS.index("kappa") + 1)
 
+    # Trapping time config from sidebar
+    ttrap_on_axis = (x_var == "ttrap" or y_var == "ttrap")
+    ttrap_cfg = _render_ttrap_sidebar() if ttrap_on_axis else None
+    ttrap_method = ttrap_cfg["method"] if ttrap_cfg else "Mean"
+    ttrap_n_bins = ttrap_cfg["n_bins"] if ttrap_cfg else 30
+    ttrap_max_cutoff = ttrap_cfg["max_cutoff"] if ttrap_cfg else 15.0
+    ttrap_use_log_bins = ttrap_cfg["use_log_bins"] if ttrap_cfg else False
+
     # Plot options
-    col_opt1, col_opt2, col_opt3 = st.columns(3)
+    col_opt1, col_opt2, col_opt3, col_opt4 = st.columns(4)
 
     with col_opt1:
         colorscale = st.selectbox(
@@ -53,6 +115,19 @@ def render_scatter_tab(df_filtered, df_exp):
             ["None", "Pe", "Pe_true", "T", "kappa"],
             index=1,  # Pe
             help="Draw lines connecting points with the same parameter value",
+        )
+
+    with col_opt4:
+        # Error bars available if ttrap is on an axis (method error)
+        # or if any plotted observable has an ERROR_COLUMNS entry
+        has_error_x = (x_var == "ttrap" and ttrap_on_axis) or x_var in ERROR_COLUMNS
+        has_error_y = (y_var == "ttrap" and ttrap_on_axis) or y_var in ERROR_COLUMNS
+        show_error_bars = st.checkbox(
+            "Show error bars",
+            value=False,
+            key="scatter_error_bars",
+            disabled=not (has_error_x or has_error_y),
+            help="Show uncertainty on axes where error data is available",
         )
 
     # Division controls
@@ -99,6 +174,49 @@ def render_scatter_tab(df_filtered, df_exp):
     if len(df_filtered) == 0:
         st.warning("⚠️ No data points match the current filters")
         return x_var, y_var, color_var, size_var
+
+    # Recompute ttrap if a non-default method is selected
+    if ttrap_on_axis and ttrap_method != "Mean":
+        all_times = load_all_trapping_times_by_params(N=40)
+        new_values = []
+        new_errors = []
+        for _, row in df_filtered.iterrows():
+            key = (round(row["Pe"], 2), round(row["T"], 2), round(row["kappa"], 2))
+            times = all_times.get(key, np.array([]))
+            val, err = compute_ttrap_for_scatter(
+                ttrap_method, times, ttrap_n_bins, ttrap_max_cutoff, ttrap_use_log_bins
+            )
+            new_values.append(val)
+            new_errors.append(err)
+        df_filtered = df_filtered.copy()
+        df_filtered["ttrap"] = new_values
+        df_filtered["ttrap_method_error"] = new_errors
+    elif ttrap_on_axis and ttrap_method == "Mean":
+        # For Mean method with custom cutoff, recompute if cutoff != default
+        if ttrap_max_cutoff != 15.0:
+            all_times = load_all_trapping_times_by_params(N=40)
+            new_values = []
+            new_errors = []
+            for _, row in df_filtered.iterrows():
+                key = (round(row["Pe"], 2), round(row["T"], 2), round(row["kappa"], 2))
+                times = all_times.get(key, np.array([]))
+                val, err = compute_ttrap_for_scatter(
+                    "Mean", times, ttrap_n_bins, ttrap_max_cutoff, ttrap_use_log_bins
+                )
+                new_values.append(val)
+                new_errors.append(err)
+            df_filtered = df_filtered.copy()
+            df_filtered["ttrap"] = new_values
+            df_filtered["ttrap_method_error"] = new_errors
+        else:
+            # Default Mean: compute SE from ttrap_std in CSV
+            df_filtered = df_filtered.copy()
+            if "ttrap_std" in df_filtered.columns and "transloc_total_events" in df_filtered.columns:
+                n_events = df_filtered["transloc_total_events"].replace(0, np.nan)
+                df_filtered["ttrap_method_error"] = df_filtered["ttrap_std"] / np.sqrt(n_events)
+            elif "ttrap_std" in df_filtered.columns:
+                # Fallback: use std as-is (overestimate, but visible)
+                df_filtered["ttrap_method_error"] = df_filtered["ttrap_std"]
 
     # Prepare plot data (ensure unique columns)
     cols_needed = list(dict.fromkeys([x_var, y_var, "T", "Pe", "Pe_true", "kappa"]))
@@ -161,6 +279,34 @@ def render_scatter_tab(df_filtered, df_exp):
         y_var_display = f"{y_var} / {y_divisor}"
         latex_labels_custom[y_col_plot] = f"{LATEX_LABELS.get(y_var, y_var)} / {LATEX_LABELS.get(y_divisor, y_divisor)}"
 
+    # Resolve error columns for each axis
+    error_x_col = None
+    error_y_col = None
+    if show_error_bars:
+        # X-axis error
+        if x_var == "ttrap" and "ttrap_method_error" in df_filtered.columns:
+            plot_data["_error_x"] = df_filtered["ttrap_method_error"]
+            error_x_col = "_error_x"
+        elif x_var in ERROR_COLUMNS and ERROR_COLUMNS[x_var] in df_filtered.columns:
+            plot_data["_error_x"] = df_filtered[ERROR_COLUMNS[x_var]]
+            error_x_col = "_error_x"
+
+        # Y-axis error
+        if y_var == "ttrap" and "ttrap_method_error" in df_filtered.columns:
+            plot_data["_error_y"] = df_filtered["ttrap_method_error"]
+            error_y_col = "_error_y"
+        elif y_var in ERROR_COLUMNS and ERROR_COLUMNS[y_var] in df_filtered.columns:
+            plot_data["_error_y"] = df_filtered[ERROR_COLUMNS[y_var]]
+            error_y_col = "_error_y"
+
+        # Scale errors when division is applied (error(a/b) ≈ error(a)/b)
+        if error_x_col and divide_x and x_divisor != x_var:
+            divisor_vals = plot_data[x_divisor].replace(0, np.nan)
+            plot_data["_error_x"] = plot_data["_error_x"] / divisor_vals.abs()
+        if error_y_col and divide_y and y_divisor != y_var:
+            divisor_vals = plot_data[y_divisor].replace(0, np.nan)
+            plot_data["_error_y"] = plot_data["_error_y"] / divisor_vals.abs()
+
     # Filter out NaN and infinite values from divided columns
     plot_data = plot_data.replace([np.inf, -np.inf], np.nan)
     plot_data = plot_data.dropna(subset=[x_col_plot, y_col_plot])
@@ -197,6 +343,22 @@ def render_scatter_tab(df_filtered, df_exp):
             "size": LATEX_LABELS[size_var] if size_var != "None" else "",
         },
     )
+
+    # Add error bars to scatter traces
+    if show_error_bars:
+        error_y_dict = None
+        error_x_dict = None
+        if error_y_col and error_y_col in plot_data.columns:
+            err_vals = plot_data[error_y_col].fillna(0).values
+            error_y_dict = dict(type="data", array=err_vals, visible=True)
+        if error_x_col and error_x_col in plot_data.columns:
+            err_vals = plot_data[error_x_col].fillna(0).values
+            error_x_dict = dict(type="data", array=err_vals, visible=True)
+        fig.update_traces(
+            error_y=error_y_dict,
+            error_x=error_x_dict,
+            selector=dict(mode="markers"),
+        )
 
     # Customize colorbar ticks for log scale (show original values, not log values)
     if use_log_colorbar and color_col is not None:
@@ -285,13 +447,49 @@ def render_scatter_tab(df_filtered, df_exp):
     # Add experimental data points if available
     if df_exp is not None and x_var in df_exp.columns and y_var in df_exp.columns:
         exp_plot_data = df_exp[["T_celsius", x_var, y_var]].dropna()
+
+        # Recompute exp ttrap if method selector is active
+        exp_ttrap_recomputed = {}
+        if ttrap_on_axis and (x_var == "ttrap" or y_var == "ttrap"):
+            exp_trap_df = load_exp_trapping_data()
+            if exp_trap_df is not None and len(exp_trap_df) > 0:
+                for temp in exp_plot_data["T_celsius"].unique():
+                    temp_int = int(temp)
+                    times = np.array(
+                        exp_trap_df[exp_trap_df["T_exp"] == temp_int]["time_min"].tolist()
+                    )
+                    if len(times) > 0:
+                        val, err = compute_ttrap_for_scatter(
+                            ttrap_method, times, ttrap_n_bins, ttrap_max_cutoff, ttrap_use_log_bins
+                        )
+                        exp_ttrap_recomputed[temp] = (val, err)
+
         if len(exp_plot_data) > 0:
             for temp in exp_plot_data["T_celsius"].unique():
                 temp_data = exp_plot_data[exp_plot_data["T_celsius"] == temp]
+
+                # Use recomputed values if available
+                x_vals = temp_data[x_var].values
+                y_vals = temp_data[y_var].values
+                exp_err_x = None
+                exp_err_y = None
+
+                if temp in exp_ttrap_recomputed:
+                    val, err = exp_ttrap_recomputed[temp]
+                    if not np.isnan(val):
+                        if x_var == "ttrap":
+                            x_vals = [val]
+                            if show_error_bars and not np.isnan(err):
+                                exp_err_x = dict(type="data", array=[err], visible=True)
+                        if y_var == "ttrap":
+                            y_vals = [val]
+                            if show_error_bars and not np.isnan(err):
+                                exp_err_y = dict(type="data", array=[err], visible=True)
+
                 fig.add_trace(
                     go.Scatter(
-                        x=temp_data[x_var],
-                        y=temp_data[y_var],
+                        x=x_vals,
+                        y=y_vals,
                         mode="markers",
                         marker=dict(
                             symbol="star",
@@ -299,6 +497,8 @@ def render_scatter_tab(df_filtered, df_exp):
                             color=EXP_TEMP_COLORS.get(temp, "black"),
                             line=dict(color="black", width=2),
                         ),
+                        error_x=exp_err_x,
+                        error_y=exp_err_y,
                         name=f"Exp T={int(temp)}°C",
                         showlegend=False,
                     )

@@ -145,7 +145,7 @@ def fit_exponential_log_space(times, bins):
         return None, None, None
 
 
-def fit_exponential(times, n_bins=30, max_cutoff=None):
+def fit_exponential(times, n_bins=30, max_cutoff=None, use_log_bins=False):
     """Fit proper exponential PDF to trapping time distribution.
 
     Uses constrained form (1/τ) * exp(-t/τ) where amplitude = 1/τ.
@@ -158,7 +158,8 @@ def fit_exponential(times, n_bins=30, max_cutoff=None):
         return None, None
 
     # Create histogram with density=True for proper PDF
-    counts, bin_edges = np.histogram(times, bins=n_bins, density=True)
+    bins = _make_bins(max_cutoff or float(np.max(times)), n_bins, use_log_bins)
+    counts, bin_edges = np.histogram(times, bins=bins, density=True)
     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
 
     # Filter zero counts
@@ -182,6 +183,74 @@ def fit_exponential(times, n_bins=30, max_cutoff=None):
         return tau, tau_error
     except Exception:
         return None, None
+
+
+def compute_ttrap_for_scatter(method, times, n_bins=30, max_cutoff=None, use_log_bins=False):
+    """Compute trapping time value and error for a given method.
+
+    Args:
+        method: "Mean", "Median", "τ_c (log-space)", "τ_c (direct fit)"
+        times: array of trapping times
+        n_bins: number of bins for histogram fits
+        max_cutoff: max time cutoff (applied before computation)
+        use_log_bins: use logarithmically spaced bins instead of linear
+
+    Returns:
+        (value, error) tuple
+    """
+    if len(times) == 0:
+        return np.nan, np.nan
+
+    if max_cutoff is not None:
+        times = times[times <= max_cutoff]
+
+    if len(times) == 0:
+        return np.nan, np.nan
+
+    if method == "Mean":
+        return np.mean(times), np.std(times) / np.sqrt(len(times))
+
+    elif method == "Median":
+        # Asymptotic SE approximation for the median
+        return np.median(times), 1.253 * np.std(times) / np.sqrt(len(times))
+
+    elif method == "τ_c (log-space)":
+        bins = _make_bins(max_cutoff or np.max(times), n_bins, use_log_bins)
+        tau, tau_error, _ = fit_exponential_log_space(times, bins)
+        return (tau, tau_error) if tau is not None else (np.nan, np.nan)
+
+    elif method == "τ_c (direct fit)":
+        tau, tau_error = fit_exponential(times, n_bins, max_cutoff, use_log_bins)
+        return (tau, tau_error) if tau is not None else (np.nan, np.nan)
+
+    return np.nan, np.nan
+
+
+@st.cache_data
+def load_all_trapping_times_by_params(N=40):
+    """Load all trapping times from DB, grouped by (Pe, T, kappa).
+
+    Returns:
+        dict mapping (Pe, T, kappa) -> np.array of trapping times
+    """
+    db_path = get_db_path()
+    if not db_path.exists():
+        return {}
+
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT Pe, T, kappa, time_min FROM trapping_events WHERE N = ?", (N,)
+    )
+
+    from collections import defaultdict
+    result = defaultdict(list)
+    for Pe, T, kappa, time_min in cursor.fetchall():
+        key = (round(Pe, 2), round(T, 2), round(kappa, 2))
+        result[key].append(time_min)
+
+    conn.close()
+    return {k: np.array(v) for k, v in result.items()}
 
 
 @st.cache_data
@@ -223,7 +292,7 @@ def _render_publication_style_figure(exp_data_filtered, n_bins, max_cutoff, norm
             # Log-space fit
             tau_log, tau_log_error, A_log = fit_exponential_log_space(times, bins)
             # Direct fit
-            tau_pdf, tau_pdf_error = fit_exponential(times, n_bins, max_cutoff)
+            tau_pdf, tau_pdf_error = fit_exponential(times, n_bins, max_cutoff, use_log_bins)
 
             stats[temp] = {
                 "times": times,
@@ -533,7 +602,7 @@ def _render_by_length_figure(exp_data_filtered, temp, n_bins, max_cutoff,
                 )
 
         if "Direct fit" in fit_options and len(times) >= 10:
-            tau_pdf, tau_pdf_error = fit_exponential(times, n_bins, max_cutoff)
+            tau_pdf, tau_pdf_error = fit_exponential(times, n_bins, max_cutoff, use_log_bins)
             if tau_pdf is not None:
                 x_fit = np.linspace(0.01, max_cutoff, 200)
                 # Estimate amplitude from histogram
@@ -620,7 +689,7 @@ def _render_exp_trapping_subtab():
         n_bins = st.slider("Number of bins", 5, 100, 30, key="exp_trap_bins")
 
     with col_ctrl2:
-        max_cutoff = st.slider("Max τ cutoff (min)", 1.0, 15.0, MAX_TRAP_TIME_EXP, step=0.5, key="exp_trap_cutoff")
+        max_cutoff = st.slider("Max τ cutoff (min)", 0.5, 30.0, MAX_TRAP_TIME_EXP, step=0.5, key="exp_trap_cutoff")
 
     with col_ctrl3:
         normalize = st.checkbox("Normalize (density)", value=True, key="exp_trap_normalize")
@@ -636,7 +705,7 @@ def _render_exp_trapping_subtab():
 
     col_ctrl5, col_ctrl6, col_ctrl7, col_ctrl8 = st.columns(4)
     with col_ctrl5:
-        use_log_y = st.checkbox("Log scale (Y-axis)", value=False, key="exp_trap_log_y")
+        use_log_y = st.checkbox("Log scale (Y-axis)", value=True, key="exp_trap_log_y")
 
     with col_ctrl6:
         show_mean = st.checkbox("Show mean line", value=True, key="exp_trap_mean")
@@ -844,7 +913,7 @@ def _render_exp_trapping_subtab():
 
             # 2. Direct fit
             if "Direct fit" in fit_options and len(times) >= 10:
-                tau_pdf, tau_pdf_error = fit_exponential(times, n_bins, max_cutoff)
+                tau_pdf, tau_pdf_error = fit_exponential(times, n_bins, max_cutoff, use_log_bins)
                 if tau_pdf is not None:
                     counts, _ = np.histogram(times, bins=n_bins, density=normalize)
                     a_fit = max(counts) if len(counts) > 0 else 1
@@ -957,7 +1026,7 @@ def _render_exp_trapping_subtab():
 
         # 2. Direct fit
         if "Direct fit" in fit_options and len(times) >= 10:
-            tau_pdf, tau_pdf_error = fit_exponential(times, n_bins, max_cutoff)
+            tau_pdf, tau_pdf_error = fit_exponential(times, n_bins, max_cutoff, use_log_bins)
             if tau_pdf is not None:
                 counts, _ = np.histogram(times, bins=n_bins, density=normalize)
                 a_fit = max(counts) if len(counts) > 0 else 1
@@ -1015,7 +1084,7 @@ def _render_exp_trapping_subtab():
 
             # Compute both fits
             tau_log, tau_log_error, _ = fit_exponential_log_space(times, bins) if "Log-space fit" in fit_options else (None, None, None)
-            tau_pdf, tau_pdf_error = fit_exponential(times, n_bins, max_cutoff) if "Direct fit" in fit_options else (None, None)
+            tau_pdf, tau_pdf_error = fit_exponential(times, n_bins, max_cutoff, use_log_bins) if "Direct fit" in fit_options else (None, None)
 
             stats_data.append({
                 "Temperature": f"{temp}°C",
@@ -1053,22 +1122,27 @@ def _render_sim_trapping_subtab():
 
     with col1:
         available_N = sorted(param_index.keys())
-        N = st.selectbox("Polymer length (N)", available_N, index=0)
+        default_N_idx = available_N.index(40) if 40 in available_N else 0
+        N = st.selectbox("Polymer length (N)", available_N, index=default_N_idx)
 
     with col2:
         available_Pe = sorted(param_index[N].keys()) if N in param_index else []
-        Pe = st.selectbox("Pe", available_Pe, index=0 if available_Pe else None)
+        default_Pe_idx = len(available_Pe) // 2 if available_Pe else 0
+        Pe = st.selectbox("Pe", available_Pe, index=default_Pe_idx if available_Pe else None)
 
     with col3:
         available_T = sorted(param_index[N][Pe].keys()) if N in param_index and Pe in param_index[N] else []
-        T = st.selectbox("T", available_T, index=0 if available_T else None)
+        default_T_idx = len(available_T) // 2 if available_T else 0
+        T = st.selectbox("T", available_T, index=default_T_idx if available_T else None)
 
     with col4:
         kappa_options = param_index[N][Pe][T] if N in param_index and Pe in param_index[N] and T in param_index[N][Pe] else []
         kappa_labels = [f"{k:.2f} ({n} events)" for k, n in kappa_options]
+        # Default to kappa with most events
+        default_kappa_idx = max(range(len(kappa_options)), key=lambda i: kappa_options[i][1]) if kappa_options else 0
         kappa_idx = st.selectbox("κ", range(len(kappa_labels)),
                                   format_func=lambda i: kappa_labels[i] if i < len(kappa_labels) else "",
-                                  index=0 if kappa_labels else None)
+                                  index=default_kappa_idx if kappa_labels else None)
         kappa = kappa_options[kappa_idx][0] if kappa_options and kappa_idx is not None else None
 
     if kappa is None:
@@ -1091,7 +1165,8 @@ def _render_sim_trapping_subtab():
 
     with col_ctrl2:
         max_time = float(np.max(times))
-        max_cutoff = st.slider("Max τ cutoff (min)", 0.0, max_time, max_time, step=0.5)
+        default_cutoff = min(10.0, max_time)
+        max_cutoff = st.slider("Max τ cutoff (min)", 0.0, max_time, default_cutoff, step=0.5)
 
     with col_ctrl3:
         normalize = st.checkbox("Normalize (density)", value=True)
@@ -1105,9 +1180,14 @@ def _render_sim_trapping_subtab():
         )
 
     # Additional options
-    col_ctrl5, _, _, _ = st.columns(4)
+    col_ctrl5, col_ctrl6, col_ctrl7, _ = st.columns(4)
     with col_ctrl5:
-        use_log_y = st.checkbox("Log scale (Y-axis)", value=False, key="trapping_log_y")
+        use_log_y = st.checkbox("Log scale (Y-axis)", value=True, key="trapping_log_y")
+    with col_ctrl6:
+        show_mean = st.checkbox("Show mean line", value=True, key="sim_trap_mean")
+    with col_ctrl7:
+        use_log_bins = st.checkbox("Log-spaced bins", value=False, key="sim_trap_log_bins",
+                                    help="Use logarithmically spaced bins instead of linear")
 
     # Filter times
     times_filtered = times[times <= max_cutoff]
@@ -1119,15 +1199,31 @@ def _render_sim_trapping_subtab():
     # Create histogram
     fig = go.Figure()
 
-    histnorm = "probability density" if normalize else None
-    fig.add_trace(go.Histogram(
-        x=times_filtered,
-        nbinsx=n_bins,
-        histnorm=histnorm,
-        name="Distribution",
-        marker_color="steelblue",
-        opacity=0.7
-    ))
+    # Build bins (same logic as Experimental tab)
+    bins = _make_bins(max_cutoff, n_bins, use_log_bins)
+
+    if use_log_bins:
+        counts, bin_edges = np.histogram(times_filtered, bins=bins, density=normalize)
+        bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+        bin_widths = np.diff(bin_edges)
+        fig.add_trace(go.Bar(
+            x=bin_centers,
+            y=counts,
+            width=bin_widths,
+            name="Distribution",
+            marker_color="steelblue",
+            opacity=0.7,
+        ))
+    else:
+        histnorm = "probability density" if normalize else None
+        fig.add_trace(go.Histogram(
+            x=times_filtered,
+            nbinsx=n_bins,
+            histnorm=histnorm,
+            name="Distribution",
+            marker_color="steelblue",
+            opacity=0.7
+        ))
 
     # Fit and overlay
     tau_log = None
@@ -1135,7 +1231,6 @@ def _render_sim_trapping_subtab():
     tau_pdf = None
     tau_pdf_error = None
     x_fit = np.linspace(0, max_cutoff, 200)
-    bins = np.linspace(0, max_cutoff, n_bins + 1)
 
     # Log-space fit
     if "Log-space fit" in fit_options:
@@ -1152,7 +1247,7 @@ def _render_sim_trapping_subtab():
 
     # Direct fit
     if "Direct fit" in fit_options:
-        tau_pdf, tau_pdf_error = fit_exponential(times_filtered, n_bins, max_cutoff)
+        tau_pdf, tau_pdf_error = fit_exponential(times_filtered, n_bins, max_cutoff, use_log_bins)
         if tau_pdf is not None:
             counts, _ = np.histogram(times_filtered, bins=n_bins, density=normalize)
             a_fit = max(counts) if len(counts) > 0 else 1
@@ -1164,6 +1259,23 @@ def _render_sim_trapping_subtab():
                 name=f"Direct fit: τ = {tau_pdf:.2f} ± {tau_pdf_error:.2f} min",
                 line=dict(color="green", width=2, dash="dot")
             ))
+
+    # Mean line (MLE estimate)
+    mean_val = float(np.mean(times_filtered))
+    if show_mean:
+        if normalize:
+            y_mean = (1.0 / mean_val) * np.exp(-x_fit / mean_val)
+        else:
+            bin_width = max_cutoff / n_bins
+            y_mean = len(times_filtered) * bin_width * (1.0 / mean_val) * np.exp(-x_fit / mean_val)
+
+        fig.add_trace(go.Scatter(
+            x=x_fit,
+            y=y_mean,
+            mode="lines",
+            name=f"MLE: τ = μ = {mean_val:.2f} min",
+            line=dict(color="black", width=2, dash="dot")
+        ))
 
     # Update layout
     fig.update_layout(
@@ -1214,10 +1326,357 @@ def render_trapping_tab():
     st.header("Trapping Time Distributions")
 
     # Sub-tabs for simulation and experimental data
-    tab_sim, tab_exp = st.tabs(["Simulation", "Experimental (all lengths)"])
+    tab_sim, tab_exp, tab_cmp = st.tabs(
+        ["Simulation", "Experimental (all lengths)", "Exp vs Sim comparison"]
+    )
 
     with tab_sim:
         _render_sim_trapping_subtab()
 
     with tab_exp:
         _render_exp_trapping_subtab()
+
+    with tab_cmp:
+        _render_comparison_subtab()
+
+
+# =============================================================================
+# COMPARISON SUBTAB: Exp vs Sim, side by side per temperature
+# =============================================================================
+
+TEMPERATURES_CMP = [10, 20, 30]
+TEMP_COLORS_CMP = {10: "#3498db", 20: "#2ecc71", 30: "#e74c3c"}
+
+
+@st.cache_data
+def _get_common_sim_params():
+    """Get (Pe, T, kappa) combos available for all N=40,50,60."""
+    db_path = get_db_path()
+    if not db_path.exists():
+        return []
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT DISTINCT Pe, T, kappa FROM trapping_events WHERE N = 40
+        ORDER BY Pe, T, kappa
+    """)
+    params = cursor.fetchall()
+    conn.close()
+    return params
+
+
+@st.cache_data
+def _best_match_for_temp(temp_exp, sim_params):
+    """Find sim params whose mean τ_trap (N=40) is closest to experimental mean."""
+    if not DB_EXP.exists() or not sim_params:
+        return 0
+
+    conn_exp = sqlite3.connect(DB_EXP)
+    import pandas as pd
+    df_exp = pd.read_sql(
+        f"SELECT time_min FROM exp_trapping_events WHERE T_exp = {temp_exp} AND time_min <= {MAX_TRAP_TIME_EXP}",
+        conn_exp,
+    )
+    conn_exp.close()
+
+    if len(df_exp) == 0:
+        return 0
+    mean_exp = df_exp["time_min"].mean()
+
+    db_path = get_db_path()
+    conn_sim = sqlite3.connect(db_path)
+    best_idx, best_diff = 0, float("inf")
+
+    for idx, (Pe, T, kappa) in enumerate(sim_params):
+        cursor = conn_sim.cursor()
+        cursor.execute("""
+            SELECT time_min FROM trapping_events
+            WHERE N = 40 AND ABS(Pe - ?) < 0.001 AND ABS(T - ?) < 0.001
+            AND ABS(kappa - ?) < 0.001 AND time_min <= ?
+        """, (Pe, T, kappa, MAX_TRAP_TIME_EXP))
+        times = [r[0] for r in cursor.fetchall()]
+        if times:
+            diff = abs(np.mean(times) - mean_exp)
+            if diff < best_diff:
+                best_diff = diff
+                best_idx = idx
+
+    conn_sim.close()
+    return best_idx
+
+
+def _render_comparison_subtab():
+    """Render side-by-side Exp vs Sim histograms, one per temperature."""
+    st.subheader("Experimental vs Simulation trapping time distributions")
+    st.markdown("Three panels side by side (one per temperature). "
+                "Select simulation parameters to overlay on experimental data.")
+
+    # Check databases
+    if not DB_EXP.exists():
+        st.error(f"Experimental database not found: {DB_EXP}")
+        return
+
+    db_path = get_db_path()
+    if not db_path.exists():
+        st.error(f"Simulation database not found: {db_path}")
+        return
+
+    # Load experimental data
+    exp_data = load_exp_trapping_data()
+    if exp_data is None or len(exp_data) == 0:
+        st.error("No experimental trapping data.")
+        return
+
+    # Get simulation parameter options
+    sim_params = _get_common_sim_params()
+    if not sim_params:
+        st.warning("No simulation parameter sets found in database.")
+        return
+
+    param_labels = [f"Pe={p[0]:.2f}, T={p[1]:.2f}, κ={p[2]:.2f}" for p in sim_params]
+
+    # Best-match defaults
+    default_indices = {
+        temp: _best_match_for_temp(temp, tuple(sim_params))
+        for temp in TEMPERATURES_CMP
+    }
+
+    # --- Parameter selectors (one per temperature) ---
+    st.markdown("**Simulation parameters per temperature**")
+    cols_sel = st.columns(3)
+    selected_params = {}
+    for i, temp in enumerate(TEMPERATURES_CMP):
+        with cols_sel[i]:
+            show = st.checkbox(f"T={temp}°C", value=True, key=f"cmp_show_{temp}")
+            if show:
+                idx = st.selectbox(
+                    "Sim params",
+                    options=range(len(param_labels)),
+                    index=default_indices[temp],
+                    format_func=lambda j, opts=param_labels: opts[j],
+                    key=f"cmp_params_{temp}",
+                )
+                selected_params[temp] = sim_params[idx]
+
+    st.caption(f"{len(sim_params)} parameter sets available")
+
+    # --- Histogram controls ---
+    st.markdown("---")
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        n_bins = st.slider("Number of bins", 5, 100, 30, key="cmp_bins")
+    with c2:
+        max_cutoff = st.slider("Max τ cutoff (min)", 0.5, 30.0, 10.0,
+                                step=0.5, key="cmp_cutoff")
+    with c3:
+        normalize = st.checkbox("Normalize (density)", value=True, key="cmp_norm")
+    with c4:
+        fit_options = st.multiselect(
+            "Fit method(s)",
+            ["Log-space fit", "Direct fit"],
+            default=["Log-space fit"],
+            key="cmp_fit",
+            help="Log-space: régression linéaire sur log(P), robuste. Direct: fit sur P(τ) en échelle linéaire."
+        )
+
+    c5, c6, c7, _ = st.columns(4)
+    with c5:
+        use_log_y = st.checkbox("Log Y-axis", value=True, key="cmp_log_y")
+    with c6:
+        show_mean = st.checkbox("Show mean line", value=True, key="cmp_mean")
+    with c7:
+        use_log_bins = st.checkbox("Log-spaced bins", value=False, key="cmp_log_bins")
+
+    # Build bins (same logic as Experimental tab)
+    bins = _make_bins(max_cutoff, n_bins, use_log_bins)
+
+    # --- Create 3-column figure ---
+    from plotly.subplots import make_subplots
+
+    fig = make_subplots(
+        rows=1, cols=3,
+        subplot_titles=[f"T = {t}°C" for t in TEMPERATURES_CMP],
+        shared_yaxes=True,
+        horizontal_spacing=0.04,
+    )
+
+    x_fit = np.linspace(0.01, max_cutoff, 200)
+    bin_centers = (bins[:-1] + bins[1:]) / 2
+    import pandas as pd
+
+    for col_idx, temp in enumerate(TEMPERATURES_CMP, 1):
+        color_exp = TEMP_COLORS_CMP[temp]
+
+        # --- Experimental histogram ---
+        df_temp = exp_data[exp_data["T_exp"] == temp]
+        exp_times = np.array(df_temp["time_min"].tolist())
+        exp_times = exp_times[exp_times <= max_cutoff]
+
+        if len(exp_times) > 0:
+            counts_exp, _ = np.histogram(exp_times, bins=bins, density=normalize)
+            mask_exp = counts_exp > 0
+
+            fig.add_trace(
+                go.Scatter(
+                    x=bin_centers[mask_exp], y=counts_exp[mask_exp],
+                    mode="markers",
+                    name=f"Exp T={temp}°C (N={len(exp_times)})",
+                    marker=dict(
+                        symbol="circle",
+                        size=10,
+                        color=color_exp,
+                        opacity=0.8,
+                        line=dict(width=1, color="black"),
+                    ),
+                    showlegend=(col_idx == 1),
+                    legendgroup="exp",
+                ),
+                row=1, col=col_idx,
+            )
+
+            # Fit on experimental
+            if "Log-space fit" in fit_options and len(exp_times) >= 10:
+                tau, tau_err, A = fit_exponential_log_space(exp_times, bins)
+                if tau is not None:
+                    fig.add_trace(go.Scatter(
+                        x=x_fit, y=A * np.exp(-x_fit / tau),
+                        mode="lines", line=dict(color=color_exp, width=2, dash="dash"),
+                        name=f"Exp τ_log={tau:.2f}±{tau_err:.2f}",
+                        showlegend=(col_idx == 1), legendgroup="exp_fit_log",
+                    ), row=1, col=col_idx)
+            if "Direct fit" in fit_options and len(exp_times) >= 10:
+                tau, tau_err = fit_exponential(exp_times, n_bins, max_cutoff, use_log_bins)
+                if tau is not None:
+                    fig.add_trace(go.Scatter(
+                        x=x_fit, y=exponential_pdf(x_fit, tau),
+                        mode="lines", line=dict(color=color_exp, width=2, dash="dot"),
+                        name=f"Exp τ_pdf={tau:.2f}±{tau_err:.2f}",
+                        showlegend=(col_idx == 1), legendgroup="exp_fit_pdf",
+                    ), row=1, col=col_idx)
+
+            # Mean line on experimental
+            if show_mean:
+                mean_exp = float(np.mean(exp_times))
+                if normalize:
+                    y_mean = (1.0 / mean_exp) * np.exp(-x_fit / mean_exp)
+                else:
+                    bin_width = max_cutoff / n_bins
+                    y_mean = len(exp_times) * bin_width * (1.0 / mean_exp) * np.exp(-x_fit / mean_exp)
+                fig.add_trace(go.Scatter(
+                    x=x_fit, y=y_mean,
+                    mode="lines", line=dict(color=color_exp, width=1.5, dash="dashdot"),
+                    name=f"Exp μ={mean_exp:.2f}",
+                    showlegend=(col_idx == 1), legendgroup="exp_mean",
+                ), row=1, col=col_idx)
+
+        # --- Simulation histogram ---
+        if temp in selected_params:
+            Pe, T_sim, kappa = selected_params[temp]
+            sim_times = load_trapping_times(40, Pe, T_sim, kappa)
+            sim_times = sim_times[sim_times <= max_cutoff]
+
+            if len(sim_times) > 0:
+                counts_sim, _ = np.histogram(sim_times, bins=bins, density=normalize)
+                mask_sim = counts_sim > 0
+
+                fig.add_trace(
+                    go.Scatter(
+                        x=bin_centers[mask_sim], y=counts_sim[mask_sim],
+                        mode="markers",
+                        name=f"Sim Pe={Pe:.1f} κ={kappa:.1f} (N={len(sim_times)})",
+                        marker=dict(
+                            symbol="circle-open",
+                            size=10,
+                            color=color_exp,
+                            line=dict(width=2, color=color_exp),
+                        ),
+                        showlegend=(col_idx == 1),
+                        legendgroup="sim",
+                    ),
+                    row=1, col=col_idx,
+                )
+
+                # Fit on simulation (same color as temp, thinner line to distinguish)
+                if "Log-space fit" in fit_options and len(sim_times) >= 10:
+                    tau_s, tau_s_err, A_s = fit_exponential_log_space(sim_times, bins)
+                    if tau_s is not None:
+                        fig.add_trace(go.Scatter(
+                            x=x_fit, y=A_s * np.exp(-x_fit / tau_s),
+                            mode="lines", line=dict(color=color_exp, width=1.5, dash="dash"),
+                            name=f"Sim τ_log={tau_s:.2f}±{tau_s_err:.2f}",
+                            showlegend=(col_idx == 1), legendgroup="sim_fit_log",
+                        ), row=1, col=col_idx)
+                if "Direct fit" in fit_options and len(sim_times) >= 10:
+                    tau_s, tau_s_err = fit_exponential(sim_times, n_bins, max_cutoff, use_log_bins)
+                    if tau_s is not None:
+                        fig.add_trace(go.Scatter(
+                            x=x_fit, y=exponential_pdf(x_fit, tau_s),
+                            mode="lines", line=dict(color=color_exp, width=1.5, dash="dot"),
+                            name=f"Sim τ_pdf={tau_s:.2f}±{tau_s_err:.2f}",
+                            showlegend=(col_idx == 1), legendgroup="sim_fit_pdf",
+                        ), row=1, col=col_idx)
+
+                # Mean line on simulation
+                if show_mean:
+                    mean_sim = float(np.mean(sim_times))
+                    if normalize:
+                        y_mean_s = (1.0 / mean_sim) * np.exp(-x_fit / mean_sim)
+                    else:
+                        bin_width = max_cutoff / n_bins
+                        y_mean_s = len(sim_times) * bin_width * (1.0 / mean_sim) * np.exp(-x_fit / mean_sim)
+                    fig.add_trace(go.Scatter(
+                        x=x_fit, y=y_mean_s,
+                        mode="lines", line=dict(color=color_exp, width=1.5, dash="dashdot"),
+                        name=f"Sim μ={mean_sim:.2f}",
+                        showlegend=(col_idx == 1), legendgroup="sim_mean",
+                    ), row=1, col=col_idx)
+
+    # Layout
+    fig.update_layout(
+        height=450,
+        template="plotly_white",
+        legend=dict(orientation="h", yanchor="bottom", y=1.08, xanchor="center", x=0.5),
+        font=dict(size=13),
+    )
+
+    y_title = "P(τ)" if normalize else "Count"
+    fig.update_yaxes(title_text=y_title, row=1, col=1)
+    if use_log_y:
+        for c in range(1, 4):
+            fig.update_yaxes(type="log", row=1, col=c)
+
+    for c in range(1, 4):
+        fig.update_xaxes(title_text="τ (min)", row=1, col=c)
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    # --- Statistics table ---
+    with st.expander("Statistics"):
+        import pandas as pd
+        stats_rows = []
+        for temp in TEMPERATURES_CMP:
+            df_t = exp_data[exp_data["T_exp"] == temp]
+            exp_t = np.array(df_t["time_min"].tolist())
+            exp_t = exp_t[exp_t <= max_cutoff]
+            if len(exp_t) > 0:
+                stats_rows.append({
+                    "T (°C)": temp, "Source": "Experimental",
+                    "N events": len(exp_t),
+                    "Mean (min)": f"{np.mean(exp_t):.3f}",
+                    "Median (min)": f"{np.median(exp_t):.3f}",
+                    "Std (min)": f"{np.std(exp_t):.3f}",
+                })
+            if temp in selected_params:
+                Pe, T_sim, kappa = selected_params[temp]
+                sim_t = load_trapping_times(40, Pe, T_sim, kappa)
+                sim_t = sim_t[sim_t <= max_cutoff]
+                if len(sim_t) > 0:
+                    stats_rows.append({
+                        "T (°C)": temp, "Source": f"Sim (Pe={Pe:.2f}, κ={kappa:.2f})",
+                        "N events": len(sim_t),
+                        "Mean (min)": f"{np.mean(sim_t):.3f}",
+                        "Median (min)": f"{np.median(sim_t):.3f}",
+                        "Std (min)": f"{np.std(sim_t):.3f}",
+                    })
+        if stats_rows:
+            st.dataframe(pd.DataFrame(stats_rows), use_container_width=True)

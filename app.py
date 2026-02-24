@@ -108,6 +108,7 @@ try:
 
     if df_exp is not None:
         st.sidebar.info(f"✓ Loaded {len(df_exp)} experimental points")
+    filter_status_placeholder = st.sidebar.empty()
 except Exception as e:
     st.error(f"Error loading data: {e}")
     st.stop()
@@ -164,17 +165,8 @@ with st.sidebar.expander("Parameters", expanded=True):
     )
 
 # Data quality filter for rotational number
-st.sidebar.subheader("Data Quality")
-r2_min = st.sidebar.number_input("Min R²_trans (visited surface)", min_value=0.0, max_value=20.0, value=15.0, step=1.0)
-
-# Documentation
-st.sidebar.markdown("---")
-with st.sidebar.expander("📖 Documentation"):
-    readme_path = Path(__file__).parent / "README.md"
-    if readme_path.exists():
-        st.markdown(readme_path.read_text())
-    else:
-        st.warning("README.md not found")
+with st.sidebar.expander("Rotational filter"):
+    r2_min = st.number_input("Min R²_trans (visited surface)", min_value=0.0, max_value=20.0, value=15.0, step=1.0)
 
 # =============================================================================
 # APPLY FILTERS
@@ -217,7 +209,7 @@ if r2_min > 0 and "R2_trans" in df_filtered.columns:
     mask_low_r2 = df_filtered["R2_trans"] < r2_min
     df_filtered.loc[mask_low_r2, ["N_rot", "tau_trans", "R2_trans", "tau_rot"]] = np.nan
 
-st.sidebar.info(f"**{len(df_filtered)}** / {len(df)} points displayed")
+filter_status_placeholder.info(f"**{len(df_filtered)}** / {len(df)} points displayed")
 
 # =============================================================================
 # MAIN PANEL - TABS
@@ -250,6 +242,15 @@ with tab5:
 
 with tab6:
     render_rotational_tab(df_exp)
+
+# Documentation (rendered after tabs so it appears below τ_trap settings in sidebar)
+st.sidebar.markdown("---")
+with st.sidebar.expander("📖 Documentation"):
+    readme_path = Path(__file__).parent / "README.md"
+    if readme_path.exists():
+        st.markdown(readme_path.read_text())
+    else:
+        st.warning("README.md not found")
 
 # =============================================================================
 # DATA TABLE
