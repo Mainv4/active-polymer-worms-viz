@@ -55,7 +55,7 @@ def render_parameter_space_tab(df_filtered, df_exp):
         x_param = st.selectbox(
             "X-axis Parameter",
             X_PARAM_OPTIONS,
-            index=8  # tau_decorr_cavity
+            index=X_PARAM_OPTIONS.index("tau_decorr_cavity_unit")
         )
 
     with col3:

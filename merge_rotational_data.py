@@ -10,7 +10,7 @@ import numpy as np
 from pathlib import Path
 
 # Paths
-ROTATIONAL_DATA = Path("/Users/marin/Library/CloudStorage/GoogleDrive-vatinmarin@gmail.com/Mon Drive/RECHERCHE/ACTIVE_POLYMER_SIMULATION/WORMS/CONFINEMENT/N_40/DATA_ROTATIONAL/summary.txt")
+ROTATIONAL_DATA = Path("/Users/marin/Library/CloudStorage/GoogleDrive-vatinmarin@gmail.com/Mon Drive/RECHERCHE/ACTIVE_POLYMER_SIMULATION/WORMS_TRANSLOCATION/CONFINEMENT/N_40/DATA_ROTATIONAL/summary.txt")
 CSV_PATH = Path(__file__).parent / "data_confinement.csv"
 CSV_BACKUP = Path(__file__).parent / "data_confinement_backup.csv"
 

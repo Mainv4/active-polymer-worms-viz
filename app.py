@@ -164,9 +164,7 @@ with st.sidebar.expander("Parameters", expanded=True):
         format_func=lambda x: f"{x:.2f}",
     )
 
-# Data quality filter for rotational number
-with st.sidebar.expander("Rotational filter"):
-    r2_min = st.number_input("Min R²_trans (visited surface)", min_value=0.0, max_value=20.0, value=15.0, step=1.0)
+# Note: R²_trans filter removed — τ_trans now uses plateau-based method
 
 # =============================================================================
 # APPLY FILTERS
@@ -205,9 +203,7 @@ mask = pe_mask & t_mask & kappa_mask
 df_filtered = df[mask].copy()
 
 # Filter rotational data by minimum visited surface
-if r2_min > 0 and "R2_trans" in df_filtered.columns:
-    mask_low_r2 = df_filtered["R2_trans"] < r2_min
-    df_filtered.loc[mask_low_r2, ["N_rot", "tau_trans", "R2_trans", "tau_rot"]] = np.nan
+# R²_trans filter removed — plateau-based τ_trans does not need quality filtering
 
 filter_status_placeholder.info(f"**{len(df_filtered)}** / {len(df)} points displayed")
 

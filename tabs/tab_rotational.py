@@ -20,7 +20,7 @@ from utils.constants import LATEX_LABELS, EXP_TEMP_COLORS
 DROPDOWN_LABELS = {
     "N_rot": "N_rot",
     "tau_trans": "τ_trans (min)",
-    "R2_trans": "R² (visited surface)",
+    "plateau_mean": "Plateau mean",
     "tau_rot": "τ_rot (min)",
 }
 
@@ -42,7 +42,7 @@ def load_rotational_data():
 
     # Keep only rows with rotational data
     # Simplified: N_rot, τ_trans (= min(τ_15, τ_0)), R²_trans, τ_rot
-    rot_cols = ["N_rot", "tau_trans", "R2_trans", "tau_rot"]
+    rot_cols = ["N_rot", "tau_trans", "plateau_mean", "tau_rot"]
     df_rot = df.dropna(subset=rot_cols, how="all")
 
     return df_rot
@@ -76,7 +76,7 @@ def render_rotational_tab(df_exp=None):
 
     # Check which columns have data
     # Simplified: N_rot, τ_trans (= min(τ_15, τ_0)), R²_trans, τ_rot
-    rot_cols = ["N_rot", "tau_trans", "R2_trans", "tau_rot"]
+    rot_cols = ["N_rot", "tau_trans", "plateau_mean", "tau_rot"]
     available_cols = [col for col in rot_cols if col in df.columns and df[col].notna().any()]
 
     if not available_cols:

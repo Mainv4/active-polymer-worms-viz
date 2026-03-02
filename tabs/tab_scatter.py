@@ -77,7 +77,7 @@ def render_scatter_tab(df_filtered, df_exp):
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        x_var = st.selectbox("X-axis", NUMERIC_COLS, index=NUMERIC_COLS.index("tau_decorr_cavity"))
+        x_var = st.selectbox("X-axis", NUMERIC_COLS, index=NUMERIC_COLS.index("tau_decorr_cavity_unit"))
 
     with col2:
         y_var = st.selectbox("Y-axis", NUMERIC_COLS, index=NUMERIC_COLS.index("ttrap"))
